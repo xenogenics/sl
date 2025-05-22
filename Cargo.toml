@@ -1,0 +1,29 @@
+[package]
+name = "mnml"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mnmlc"
+path = "bin/mnmlc.rs"
+
+[[bin]]
+name = "mnmlvm"
+path = "bin/mnmlvm.rs"
+
+[build-dependencies]
+lalrpop = "0.20"
+
+[dependencies]
+bincode = "2.0"
+clap = { version = "4.5", features = ["derive"] }
+env_logger = "0.11"
+lalrpop-util = { version = "0.20", features = ["lexer"] }
+strum = "0.26"
+strum_macros = "0.26"
+thiserror = "2.0"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+debug = false

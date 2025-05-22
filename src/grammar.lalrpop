@@ -1,0 +1,49 @@
+use std::rc::Rc;
+
+use crate::types::Atom;
+
+grammar;
+
+match {
+	"(",
+	")",
+	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
+	r"-?[0-9]+" => Number,
+	r#""([^"]|\\")*""# => String,
+	"T" => True,
+	"_" => Wildcard,
+} else {
+	r"([a-zA-Z]|[!@$%&*_+\-={}\[\]:;|\\<>?,./])([a-zA-Z0-9]|[!@$%&*_+\-={}\[\]:;|\\<>?,./])*" => Symbol,
+}
+
+pub Lists: Vec<Rc<Atom>> = {
+	<e:List> => vec![e],
+	<mut a:Lists> <b:List> => {
+		a.push(b); 
+		a
+	}
+}
+
+List: Rc<Atom> = {
+	"(" ")" => Atom::nil(),
+	"(" <v:Items> ")" => v,
+}
+
+Items: Rc<Atom> = {
+	<e:ListOrTerminal> => Atom::cons(e, Atom::nil()),
+	<e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
+}
+
+ListOrTerminal: Rc<Atom> = {
+	<e:List> => e,
+	<e:Terminal> => e,
+}
+
+Terminal: Rc<Atom> = {
+	Char => Atom::char(<>.as_bytes()[1]),
+	Number => Atom::number(<>.parse().unwrap()),
+	String => Atom::string(<>),
+	Symbol => Atom::symbol(<>),
+	True => Atom::t(),
+	Wildcard => Atom::wildcard(),
+}
