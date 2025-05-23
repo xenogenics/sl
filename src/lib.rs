@@ -17,6 +17,7 @@ lalrpop_mod!(
 pub mod compiler;
 pub mod error;
 pub mod opcodes;
+pub mod stack;
 pub mod types;
 
 //

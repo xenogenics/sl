@@ -200,19 +200,20 @@ impl Compiler {
                 //
                 // Rotate the arguments and the return address.
                 //
-                opcodes.push(OpCode::Rot(self.locals.len() + 1));
+                if self.locals.len() > 0 {
+                    opcodes.push(OpCode::Rot(self.locals.len() + 1));
+                }
                 //
                 // Compile the statements.
                 //
                 let mut opcodes = self.compile_statements(0, rem.clone(), opcodes)?;
                 //
-                // Rotate the result with the arguments.
+                // Pop the arguments.
                 //
-                opcodes.push(OpCode::Rot(self.locals.len() + 1));
-                //
-                // Drop the arguments.
-                //
-                opcodes.push(OpCode::Pop(self.locals.len()));
+                if self.locals.len() > 0 {
+                    opcodes.push(OpCode::Rot(self.locals.len() + 1));
+                    opcodes.push(OpCode::Pop(self.locals.len()));
+                }
                 //
                 // Inject the return call.
                 //

@@ -1,13 +1,18 @@
 use std::collections::HashMap;
 
 use clap::{arg, Parser};
-use mnml::opcodes::{Immediate, OpCode};
+use mnml::{
+    opcodes::{Immediate, OpCode},
+    stack::Stack,
+};
 use thiserror::Error;
 
 #[derive(Parser)]
 struct Arguments {
     #[arg(short, long)]
     file: String,
+    #[arg(short, long, default_value_t = 128)]
+    stack_size: usize,
 }
 
 #[derive(Debug, Error)]
@@ -46,7 +51,7 @@ fn main() -> Result<(), Error> {
     //
     // Declare the stack.
     //
-    let mut stack: Vec<Immediate> = Vec::default();
+    let mut stack = Stack::new(args.stack_size);
     //
     // Push the initial return value.
     //
@@ -66,33 +71,33 @@ fn main() -> Result<(), Error> {
         //
         match state.1[pc] {
             OpCode::Add => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push(Immediate::Number(a + b));
             }
             OpCode::Ge => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push((a >= b).into());
             }
             OpCode::Gt => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push((a > b).into());
             }
             OpCode::Le => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push((a <= b).into());
             }
             OpCode::Lt => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push((a < b).into());
             }
             OpCode::Sub => {
-                let b: i64 = stack.pop().unwrap().into();
-                let a: i64 = stack.pop().unwrap().into();
+                let b: i64 = stack.pop().into();
+                let a: i64 = stack.pop().into();
                 stack.push(Immediate::Number(a - b));
             }
             OpCode::Br(v) => {
@@ -104,46 +109,22 @@ fn main() -> Result<(), Error> {
                 pc = v;
                 continue;
             }
-            OpCode::Brn(v) => {
-                if stack.pop().unwrap().is_nil() {
-                    pc += v;
-                    continue;
-                }
-            }
-            OpCode::Hlt => todo!(),
-            OpCode::Ret => {
-                let res = stack.pop().unwrap();
-                let ret = stack.pop().unwrap();
-                stack.push(res);
-                pc = ret.into();
+            OpCode::Brn(v) if stack.pop().is_nil() => {
+                pc += v;
                 continue;
             }
-            OpCode::Dup(v) => {
-                for i in stack.len() - v..stack.len() {
-                    stack.push(stack[i]);
-                }
+            OpCode::Brn(_) => (),
+            OpCode::Hlt => todo!(),
+            OpCode::Ret => {
+                pc = stack.unlink().into();
+                continue;
             }
-            OpCode::Pck(v) => {
-                stack.push(stack[stack.len() - v].clone());
-            }
-            OpCode::Pop(v) => {
-                for _ in 0..v {
-                    stack.pop();
-                }
-            }
-            OpCode::Psh(immediate) => {
-                stack.push(immediate);
-            }
-            OpCode::Rot(n) => {
-                let v = stack.pop().unwrap();
-                stack.insert(stack.len() - (n - 1), v);
-            }
-            OpCode::Swp => {
-                let a = stack.pop().unwrap();
-                let b = stack.pop().unwrap();
-                stack.push(a);
-                stack.push(b);
-            }
+            OpCode::Dup(v) => stack.dup(v),
+            OpCode::Pck(v) => stack.pick(v),
+            OpCode::Pop(v) => stack.drop(v),
+            OpCode::Psh(v) => stack.push(v),
+            OpCode::Rot(n) => stack.rotate(n),
+            OpCode::Swp => stack.swap(),
             OpCode::Ld => todo!(),
             OpCode::St => todo!(),
         }
