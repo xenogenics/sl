@@ -83,6 +83,14 @@ impl Atom {
 //
 
 impl Atom {
+    pub fn conc(a: Rc<Atom>, b: Rc<Atom>) -> Rc<Atom> {
+        match a.as_ref() {
+            Atom::Nil => b,
+            Atom::Pair(car, cdr) => Atom::cons(car.clone(), Atom::conc(cdr.clone(), b)),
+            _ => Atom::cons(a, b),
+        }
+    }
+
     pub fn cons(a: Rc<Atom>, b: Rc<Atom>) -> Rc<Atom> {
         Self::Pair(a, b).into()
     }

@@ -9,7 +9,7 @@ use crate::{
 #[derive(Default)]
 pub struct Compiler {
     labels: HashMap<Box<str>, (usize, usize)>,
-    locals: HashMap<Box<str>, usize>,
+    locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
 }
 
@@ -18,10 +18,6 @@ impl Compiler {
         &mut self,
         stmt: Vec<Rc<Atom>>,
     ) -> Result<(HashMap<Box<str>, usize>, Vec<OpCode>), Error> {
-        //
-        // Clear the local state.
-        //
-        self.stackn = 0;
         //
         // Compile the statements.
         //
@@ -189,18 +185,18 @@ impl Compiler {
                     return Err(Error::ExpectedPair);
                 };
                 //
-                // Extract the local arguments.
+                // Track the function arguments.
                 //
-                self.extract_locals(0, args.clone())?;
+                let argcnt = self.track_arguments(0, args.clone())?;
+                self.stackn = argcnt;
                 //
                 // Save the function address.
                 //
-                self.labels
-                    .insert(name.clone(), (opcodes.len(), self.locals.len()));
+                self.labels.insert(name.clone(), (opcodes.len(), argcnt));
                 //
                 // Rotate the arguments and the return address.
                 //
-                if self.locals.len() > 0 {
+                if argcnt > 0 {
                     opcodes.push(OpCode::Rot(self.locals.len() + 1));
                 }
                 //
@@ -210,9 +206,9 @@ impl Compiler {
                 //
                 // Pop the arguments.
                 //
-                if self.locals.len() > 0 {
-                    opcodes.push(OpCode::Rot(self.locals.len() + 1));
-                    opcodes.push(OpCode::Pop(self.locals.len()));
+                if argcnt > 0 {
+                    opcodes.push(OpCode::Rot(argcnt + 1));
+                    opcodes.push(OpCode::Pop(argcnt));
                 }
                 //
                 // Inject the return call.
@@ -223,6 +219,42 @@ impl Compiler {
                 // Clear the local mapping.
                 //
                 self.locals.clear();
+                //
+                // Done.
+                //
+                Ok(opcodes)
+            }
+            //
+            // Value binding: let.
+            //
+            "let" => {
+                //
+                // Split the atom.
+                //
+                let Atom::Pair(bindings, stmts) = b.as_ref() else {
+                    return Err(Error::ExpectedPair);
+                };
+                //
+                // Compile the bindings.
+                //
+                let pre = self.stackn;
+                let opcodes = self.compile_bindings(bindings.clone(), opcodes)?;
+                let argcnt = self.stackn - pre;
+                //
+                // Compile the statements.
+                //
+                let mut opcodes = self.compile_statements(0, stmts.clone(), opcodes)?;
+                //
+                // Pop the bindings.
+                //
+                if argcnt > 0 {
+                    opcodes.push(OpCode::Rot(argcnt + 1));
+                    opcodes.push(OpCode::Pop(argcnt));
+                }
+                //
+                // Clear the bindings from the locals.
+                //
+                self.clear_bindings(bindings.clone())?;
                 //
                 // Done.
                 //
@@ -256,6 +288,79 @@ impl Compiler {
             }
             _ => Err(Error::ExpectedPair),
         }
+    }
+
+    fn compile_bindings(
+        &mut self,
+        atom: Rc<Atom>,
+        opcodes: Vec<OpCode>,
+    ) -> Result<Vec<OpCode>, Error> {
+        //
+        // Split the atom.
+        //
+        let (binding, rem) = match atom.as_ref() {
+            Atom::Nil => return Ok(opcodes),
+            Atom::Pair(binding, rem) => (binding, rem),
+            _ => return Err(Error::ExpectedPair),
+        };
+        //
+        // Make sure the binding is a pair.
+        //
+        let Atom::Pair(symbol, stmt) = binding.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Make sure the symbol is a symbol.
+        //
+        let Atom::Symbol(symbol) = symbol.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Compile the statement.
+        //
+        let opcodes = self.compile_value(stmt.clone(), opcodes)?;
+        //
+        // Save the symbol's index.
+        //
+        self.locals
+            .entry(symbol.clone())
+            .or_default()
+            .push(self.stackn - 1);
+        //
+        // Process the remaining bindings.
+        //
+        self.compile_bindings(rem.clone(), opcodes)
+    }
+
+    fn clear_bindings(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
+        //
+        // Split the atom.
+        //
+        let (binding, rem) = match atom.as_ref() {
+            Atom::Nil => return Ok(()),
+            Atom::Pair(binding, rem) => (binding, rem),
+            _ => return Err(Error::ExpectedPair),
+        };
+        //
+        // Make sure the binding is a pair.
+        //
+        let Atom::Pair(symbol, _) = binding.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Make sure the symbol is a symbol.
+        //
+        let Atom::Symbol(symbol) = symbol.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Clear the binding.
+        //
+        self.locals.entry(symbol.clone()).or_default().pop();
+        //
+        // Process the remaining bindings.
+        //
+        self.clear_bindings(rem.clone())
     }
 
     fn compile_statements(
@@ -322,8 +427,12 @@ impl Compiler {
             }
             Atom::String(_) => todo!(),
             Atom::Symbol(v) => {
-                let index = *self.locals.get(v).ok_or(Error::InvalidSymbol(v.clone()))?;
-                let position = self.locals.len() - index + self.stackn;
+                let index = *self
+                    .locals
+                    .get(v)
+                    .and_then(|v| v.last())
+                    .ok_or(Error::InvalidSymbol(v.clone()))?;
+                let position = self.stackn - index;
                 opcodes.push(OpCode::Pck(position));
                 self.stackn += 1;
                 Ok(opcodes)
@@ -332,12 +441,12 @@ impl Compiler {
         }
     }
 
-    fn extract_locals(&mut self, indx: usize, atom: Rc<Atom>) -> Result<(), Error> {
+    fn track_arguments(&mut self, index: usize, atom: Rc<Atom>) -> Result<usize, Error> {
         //
         // Split the atom.
         //
         let (arg, rem) = match atom.as_ref() {
-            Atom::Nil => return Ok(()),
+            Atom::Nil => return Ok(index),
             Atom::Pair(arg, rem) => (arg, rem),
             _ => return Err(Error::ExpectedPair),
         };
@@ -350,10 +459,10 @@ impl Compiler {
         //
         // Update the argument map.
         //
-        self.locals.insert(v.to_owned(), indx);
+        self.locals.entry(v.to_owned()).or_default().push(index);
         //
         // Process the rest of the arguments.
         //
-        self.extract_locals(indx + 1, rem.clone())
+        self.track_arguments(index + 1, rem.clone())
     }
 }

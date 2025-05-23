@@ -5,8 +5,7 @@ use crate::types::Atom;
 grammar;
 
 match {
-	"(",
-	")",
+	"(", ")", ".",
 	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"]|\\")*""# => String,
@@ -27,6 +26,7 @@ pub Lists: Vec<Rc<Atom>> = {
 List: Rc<Atom> = {
 	"(" ")" => Atom::nil(),
 	"(" <v:Items> ")" => v,
+	"(" <v:Items> "." <w:ListOrTerminal> ")" => Atom::conc(v, w),
 }
 
 Items: Rc<Atom> = {
