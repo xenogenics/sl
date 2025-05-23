@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use clap::{arg, Parser};
 use mnml::{
     opcodes::{Immediate, OpCode},
@@ -40,12 +38,20 @@ fn main() -> Result<(), Error> {
     // Decode the bytecode file.
     //
     let conf = bincode::config::standard();
-    let state: (HashMap<String, usize>, Vec<OpCode>) =
+    let state: (Vec<(Box<str>, usize)>, Vec<OpCode>) =
         bincode::decode_from_std_read(&mut file, conf)?;
     //
     // Look-up the main function.
     //
-    let Some(mut pc) = state.0.get("main").copied() else {
+    let main_fn = state
+        .0
+        .iter()
+        .find_map(|(k, v)| (k.as_ref() == "main").then_some(v))
+        .copied();
+    //
+    // Make sure it exists.
+    //
+    let Some(mut pc) = main_fn else {
         return Err(Error::MainNotDefined);
     };
     //
@@ -106,7 +112,7 @@ fn main() -> Result<(), Error> {
             }
             OpCode::Brl(v) => {
                 stack.push(Immediate::Link(pc + 1));
-                pc = v;
+                pc = state.0[v].1;
                 continue;
             }
             OpCode::Brn(v) if stack.pop().is_nil() => {

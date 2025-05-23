@@ -40,9 +40,9 @@ fn sequence_of_lists() {
 #[test]
 fn single_builtin() {
     let parser = ListsParser::new();
-    let atoms = parser.parse("(+ 1 2)").unwrap();
+    let atoms = parser.parse("(+ 1 2)").unwrap().remove(0);
     let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
     assert_eq!(
         result,
         vec![
@@ -56,9 +56,9 @@ fn single_builtin() {
 #[test]
 fn nested_builtin() {
     let parser = ListsParser::new();
-    let atoms = parser.parse("(+ (- 3 4) 2)").unwrap();
+    let atoms = parser.parse("(+ (- 3 4) 2)").unwrap().remove(0);
     let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
     assert_eq!(
         result,
         vec![
@@ -74,9 +74,9 @@ fn nested_builtin() {
 #[test]
 fn if_then() {
     let parser = ListsParser::new();
-    let atoms = parser.parse("(if (< 3 0) (+ 1 2))").unwrap();
+    let atoms = parser.parse("(if (< 3 0) (+ 1 2))").unwrap().remove(0);
     let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
     assert_eq!(
         result,
         vec![
@@ -96,9 +96,12 @@ fn if_then() {
 #[test]
 fn if_then_else() {
     let parser = ListsParser::new();
-    let atoms = parser.parse("(if (< 3 0) (+ 1 2) (- 4 2))").unwrap();
+    let atoms = parser
+        .parse("(if (< 3 0) (+ 1 2) (- 4 2))")
+        .unwrap()
+        .remove(0);
     let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
     assert_eq!(
         result,
         vec![
@@ -120,9 +123,12 @@ fn if_then_else() {
 #[test]
 fn nested_if_then() {
     let parser = ListsParser::new();
-    let atoms = parser.parse("(if (< 3 0) (if (>= 1 4) (- 4 2)))").unwrap();
+    let atoms = parser
+        .parse("(if (< 3 0) (if (>= 1 4) (- 4 2)))")
+        .unwrap()
+        .remove(0);
     let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
     assert_eq!(
         result,
         vec![
@@ -143,6 +149,103 @@ fn nested_if_then() {
             OpCode::Psh(Immediate::Nil),
         ]
     );
+}
+
+#[test]
+fn let_binding_with_a_single_constant() {
+    let parser = ListsParser::new();
+    let atoms = parser.parse("(let ((a . 1)) (+ a 1))").unwrap().remove(0);
+    let mut compiler = Compiler::default();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Pck(1),
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Add,
+            OpCode::Rot(2),
+            OpCode::Pop(1),
+        ]
+    )
+}
+
+#[test]
+fn let_binding_with_a_single_funcall() {
+    let parser = ListsParser::new();
+    let atoms = parser
+        .parse("(let ((a . (+ 1 2))) (+ a 1))")
+        .unwrap()
+        .remove(0);
+    let mut compiler = Compiler::default();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Psh(Immediate::Number(2)),
+            OpCode::Add,
+            OpCode::Pck(1),
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Add,
+            OpCode::Rot(2),
+            OpCode::Pop(1),
+        ]
+    )
+}
+
+#[test]
+fn let_binding_with_multiple_bindings() {
+    let parser = ListsParser::new();
+    let atoms = parser
+        .parse("(let ((a . (+ 1 2)) (b . 2)) (+ a b))")
+        .unwrap()
+        .remove(0);
+    let mut compiler = Compiler::default();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Psh(Immediate::Number(2)),
+            OpCode::Add,
+            OpCode::Psh(Immediate::Number(2)),
+            OpCode::Pck(2),
+            OpCode::Pck(2),
+            OpCode::Add,
+            OpCode::Rot(3),
+            OpCode::Pop(2),
+        ]
+    )
+}
+
+#[test]
+fn nested_let_bindings() {
+    let parser = ListsParser::new();
+    let atoms = parser
+        .parse("(let ((a . (+ 1 2))) (let ((b . (+ a 3))) (- a b)))")
+        .unwrap()
+        .remove(0);
+    let mut compiler = Compiler::default();
+    let result = compiler.compile_funcall(atoms, Vec::new()).unwrap();
+    assert_eq!(
+        result,
+        vec![
+            OpCode::Psh(Immediate::Number(1)),
+            OpCode::Psh(Immediate::Number(2)),
+            OpCode::Add,
+            OpCode::Pck(1),
+            OpCode::Psh(Immediate::Number(3)),
+            OpCode::Add,
+            OpCode::Pck(2),
+            OpCode::Pck(2),
+            OpCode::Sub,
+            OpCode::Rot(2),
+            OpCode::Pop(1),
+            OpCode::Rot(2),
+            OpCode::Pop(1),
+        ]
+    )
 }
 
 #[test]
@@ -221,96 +324,4 @@ fn fibonacci() {
             OpCode::Ret
         ]
     );
-}
-
-#[test]
-fn let_binding_with_a_single_constant() {
-    let parser = ListsParser::new();
-    let atoms = parser.parse("(let ((a . 1)) (+ a 1))").unwrap();
-    let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
-    assert_eq!(
-        result,
-        vec![
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Pck(1),
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Add,
-            OpCode::Rot(2),
-            OpCode::Pop(1),
-        ]
-    )
-}
-
-#[test]
-fn let_binding_with_a_single_funcall() {
-    let parser = ListsParser::new();
-    let atoms = parser.parse("(let ((a . (+ 1 2))) (+ a 1))").unwrap();
-    let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
-    assert_eq!(
-        result,
-        vec![
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Psh(Immediate::Number(2)),
-            OpCode::Add,
-            OpCode::Pck(1),
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Add,
-            OpCode::Rot(2),
-            OpCode::Pop(1),
-        ]
-    )
-}
-
-#[test]
-fn let_binding_with_multiple_bindings() {
-    let parser = ListsParser::new();
-    let atoms = parser
-        .parse("(let ((a . (+ 1 2)) (b . 2)) (+ a b))")
-        .unwrap();
-    let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
-    assert_eq!(
-        result,
-        vec![
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Psh(Immediate::Number(2)),
-            OpCode::Add,
-            OpCode::Psh(Immediate::Number(2)),
-            OpCode::Pck(2),
-            OpCode::Pck(2),
-            OpCode::Add,
-            OpCode::Rot(3),
-            OpCode::Pop(2),
-        ]
-    )
-}
-
-#[test]
-fn nested_let_bindings() {
-    let parser = ListsParser::new();
-    let atoms = parser
-        .parse("(let ((a . (+ 1 2))) (let ((b . (+ a 3))) (- a b)))")
-        .unwrap();
-    let mut compiler = Compiler::default();
-    let (_, result) = compiler.compile(atoms).unwrap();
-    assert_eq!(
-        result,
-        vec![
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Psh(Immediate::Number(2)),
-            OpCode::Add,
-            OpCode::Pck(1),
-            OpCode::Psh(Immediate::Number(3)),
-            OpCode::Add,
-            OpCode::Pck(2),
-            OpCode::Pck(2),
-            OpCode::Sub,
-            OpCode::Rot(2),
-            OpCode::Pop(1),
-            OpCode::Rot(2),
-            OpCode::Pop(1),
-        ]
-    )
 }

@@ -17,27 +17,121 @@ impl Compiler {
     pub fn compile(
         &mut self,
         stmt: Vec<Rc<Atom>>,
-    ) -> Result<(HashMap<Box<str>, usize>, Vec<OpCode>), Error> {
+    ) -> Result<(Vec<(Box<str>, usize)>, Vec<OpCode>), Error> {
         //
         // Compile the statements.
         //
-        let opcodes = stmt
+        let blocks: Vec<_> = stmt
             .into_iter()
-            .try_fold(Vec::new(), |acc, v| self.compile_funcall(v, acc))?;
+            .map(|v| self.compile_defun(v))
+            .collect::<Result<_, _>>()?;
         //
-        // Clean-up the labels.
+        // Serialize the blocks.
         //
-        let labels = self.labels.drain().map(|(k, (v, _))| (k, v)).collect();
+        let result = blocks.into_iter().fold(
+            (Vec::new(), Vec::new()),
+            |(mut offsets, mut opcodes), (name, block)| {
+                offsets.push((name, opcodes.len()));
+                opcodes.extend(block);
+                (offsets, opcodes)
+            },
+        );
         //
         // Done.
         //
-        Ok((labels, opcodes))
+        Ok(result)
     }
 
-    fn compile_funcall(
+    fn compile_defun(&mut self, atom: Rc<Atom>) -> Result<(Box<str>, Vec<OpCode>), Error> {
+        let mut opcodes = Vec::default();
+        //
+        // Split the function call.
+        //
+        let Atom::Pair(a, b) = atom.as_ref() else {
+            return Err(Error::ExpectedFunctionCall);
+        };
+        //
+        // Get the function symbol.
+        //
+        let Atom::Symbol(symbol) = a.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Make sure we have a function definition.
+        //
+        if symbol.as_ref() != "def" {
+            return Err(Error::ExpectedFunctionDefinition);
+        }
+        //
+        // Extract the function name.
+        //
+        let Atom::Pair(name, rem) = b.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Make sure the function name is a symbol.
+        //
+        let Atom::Symbol(name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Make sure the function does not exist.
+        //
+        if self.labels.contains_key(name.as_ref()) {
+            return Err(Error::FunctionAlreadyDefined(name.clone()));
+        }
+        //
+        // Extract the arguments.
+        //
+        let Atom::Pair(args, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Track the function arguments.
+        //
+        let argcnt = self.track_arguments(0, args.clone())?;
+        self.stackn = argcnt;
+        //
+        // Save the function address.
+        //
+        let index = self.labels.len();
+        self.labels.insert(name.clone(), (index, argcnt));
+        //
+        // Rotate the arguments and the return address.
+        //
+        if argcnt > 0 {
+            opcodes.push(OpCode::Rot(self.locals.len() + 1));
+        }
+        //
+        // Compile the statements.
+        //
+        let mut opcodes = self.compile_statements(0, rem.clone(), opcodes)?;
+        //
+        // Pop the arguments.
+        //
+        if argcnt > 0 {
+            opcodes.push(OpCode::Rot(argcnt + 1));
+            opcodes.push(OpCode::Pop(argcnt));
+        }
+        //
+        // Inject the return call.
+        //
+        opcodes.push(OpCode::Ret);
+        self.stackn -= 1;
+        //
+        // Clear the local mapping.
+        //
+        self.locals.clear();
+        //
+        // Done.
+        //
+        Ok((name.clone(), opcodes))
+    }
+
+    pub(crate) fn compile_funcall(
         &mut self,
         atom: Rc<Atom>,
-        mut opcodes: Vec<OpCode>,
+        opcodes: Vec<OpCode>,
     ) -> Result<Vec<OpCode>, Error> {
         //
         // Split the function call.
@@ -157,74 +251,6 @@ impl Compiler {
                 Ok(opcodes)
             }
             //
-            // Function definition: def.
-            //
-            "def" => {
-                //
-                // Extract the function name.
-                //
-                let Atom::Pair(name, rem) = b.as_ref() else {
-                    return Err(Error::ExpectedPair);
-                };
-                //
-                // Make sure the function name is a symbol.
-                //
-                let Atom::Symbol(name) = name.as_ref() else {
-                    return Err(Error::ExpectedSymbol);
-                };
-                //
-                // Make sure the function does not exist.
-                //
-                if self.labels.contains_key(name.as_ref()) {
-                    return Err(Error::FunctionAlreadyDefined(name.clone()));
-                }
-                //
-                // Extract the arguments.
-                //
-                let Atom::Pair(args, rem) = rem.as_ref() else {
-                    return Err(Error::ExpectedPair);
-                };
-                //
-                // Track the function arguments.
-                //
-                let argcnt = self.track_arguments(0, args.clone())?;
-                self.stackn = argcnt;
-                //
-                // Save the function address.
-                //
-                self.labels.insert(name.clone(), (opcodes.len(), argcnt));
-                //
-                // Rotate the arguments and the return address.
-                //
-                if argcnt > 0 {
-                    opcodes.push(OpCode::Rot(self.locals.len() + 1));
-                }
-                //
-                // Compile the statements.
-                //
-                let mut opcodes = self.compile_statements(0, rem.clone(), opcodes)?;
-                //
-                // Pop the arguments.
-                //
-                if argcnt > 0 {
-                    opcodes.push(OpCode::Rot(argcnt + 1));
-                    opcodes.push(OpCode::Pop(argcnt));
-                }
-                //
-                // Inject the return call.
-                //
-                opcodes.push(OpCode::Ret);
-                self.stackn -= 1;
-                //
-                // Clear the local mapping.
-                //
-                self.locals.clear();
-                //
-                // Done.
-                //
-                Ok(opcodes)
-            }
-            //
             // Value binding: let.
             //
             "let" => {
@@ -260,6 +286,10 @@ impl Compiler {
                 //
                 Ok(opcodes)
             }
+            //
+            // Function definition are forbidden.
+            //
+            "def" => Err(Error::FunctionDefinitionTopLevelOnly),
             //
             // Other symbol.
             //
