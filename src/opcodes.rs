@@ -1,47 +1,30 @@
+use bincode::{Decode, Encode};
+
 //
 // Immediate values.
 //
-
-use bincode::{Decode, Encode};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
 pub enum Immediate {
     Nil,
     True,
     Char(u8),
-    Link(usize),
     Number(i64),
+    Funcall(usize),
 }
 
 impl Immediate {
-    pub fn is_nil(&self) -> bool {
+    pub const fn funcall(&self) -> usize {
         match self {
-            Immediate::Nil => true,
-            _ => false,
+            Immediate::Funcall(v) => *v,
+            _ => panic!("Expected a funcall"),
         }
     }
-}
 
-impl Into<i64> for Immediate {
-    fn into(self) -> i64 {
+    pub const fn number(&self) -> i64 {
         match self {
-            Self::Nil => 0,
-            Self::True => 1,
-            Self::Char(v) => v as i64,
-            Self::Link(v) => v as i64,
-            Self::Number(v) => v,
-        }
-    }
-}
-
-impl Into<usize> for Immediate {
-    fn into(self) -> usize {
-        match self {
-            Self::Nil => 0,
-            Self::True => 1,
-            Self::Char(v) => v as usize,
-            Self::Link(v) => v,
-            Self::Number(v) => v as usize,
+            Immediate::Number(v) => *v,
+            _ => panic!("Expected a number"),
         }
     }
 }
@@ -73,18 +56,25 @@ pub enum OpCode {
     Lt,
     Sub,
     //
+    // List operations.
+    //
+    Car,
+    Cdr,
+    Cons,
+    //
     // Control flow.
     //
     Br(usize),
-    Brl(usize),
     Brn(usize),
+    Call,
     Hlt,
     Ret,
     //
     // Stack operations.
     //
     Dup(usize),
-    Pck(usize),
+    Get(usize),
+    Pak(usize),
     Pop(usize),
     Psh(Immediate),
     Rot(usize),
@@ -95,3 +85,5 @@ pub enum OpCode {
     Ld,
     St,
 }
+
+pub type OpCodes = Vec<OpCode>;

@@ -1,14 +1,15 @@
 use std::rc::Rc;
 
-use crate::types::Atom;
+use crate::atom::Atom;
 
 grammar;
 
 match {
-	"(", ")", ".",
+	"(", ")", ".", "'",
 	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"]|\\")*""# => String,
+	"nil" => Nil,
 	"T" => True,
 	"_" => Wildcard,
 } else {
@@ -30,8 +31,9 @@ List: Rc<Atom> = {
 }
 
 Items: Rc<Atom> = {
-	<e:ListOrTerminal> => Atom::cons(e, Atom::nil()),
-	<e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
+	"'" <e:ListOrTerminal>           => Atom::cons(Atom::cons(Atom::symbol("quote"), e), Atom::nil()), 
+	    <e:ListOrTerminal>           => Atom::cons(e, Atom::nil()),
+	    <e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
 }
 
 ListOrTerminal: Rc<Atom> = {
@@ -44,6 +46,7 @@ Terminal: Rc<Atom> = {
 	Number => Atom::number(<>.parse().unwrap()),
 	String => Atom::string(<>),
 	Symbol => Atom::symbol(<>),
+	Nil => Atom::nil(),
 	True => Atom::t(),
 	Wildcard => Atom::wildcard(),
 }

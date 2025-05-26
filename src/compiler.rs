@@ -1,49 +1,161 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use crate::{
+    atom::Atom,
     error::Error,
-    opcodes::{Immediate, OpCode},
-    types::Atom,
+    opcodes::{Immediate, OpCode, OpCodes},
 };
+
+//
+// Context.
+//
+
+#[derive(Default, Debug)]
+pub(crate) struct Context {
+    locals: HashMap<Box<str>, Vec<usize>>,
+    stackn: usize,
+    stream: Stream,
+}
+
+impl Context {
+    #[cfg(test)]
+    pub(crate) fn stream(&self) -> &Stream {
+        &self.stream
+    }
+
+    fn track(&mut self, atom: Rc<Atom>) -> Result<usize, Error> {
+        //
+        // Split the atom.
+        //
+        let (arg, rem) = match atom.as_ref() {
+            Atom::Nil => return Ok(self.stackn),
+            Atom::Pair(arg, rem) => (arg, rem),
+            _ => return Err(Error::ExpectedPair),
+        };
+        //
+        // Make sure the argument is a symbol.
+        //
+        let Atom::Symbol(v) = arg.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Update the argument map.
+        //
+        self.locals
+            .entry(v.to_owned())
+            .or_default()
+            .push(self.stackn);
+        //
+        // Update the stack position.
+        //
+        self.stackn += 1;
+        //
+        // Process the rest of the arguments.
+        //
+        self.track(rem.clone())
+    }
+}
+
+//
+// OpCode or reference.
+//
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum LabelOrOpCode {
+    Branch(Box<str>),
+    BranchIfNot(Box<str>),
+    Funcall(Box<str>),
+    OpCode(OpCode),
+}
+
+impl From<OpCode> for LabelOrOpCode {
+    fn from(value: OpCode) -> Self {
+        Self::OpCode(value)
+    }
+}
+
+//
+// Stream.
+//
+
+type Stream = Vec<LabelOrOpCode>;
+
+//
+// Compiler.
+//
 
 #[derive(Default)]
 pub struct Compiler {
-    labels: HashMap<Box<str>, (usize, usize)>,
-    locals: HashMap<Box<str>, Vec<usize>>,
-    stackn: usize,
+    blocks: Vec<(Box<str>, Context)>,
+    defuns: HashSet<Box<str>>,
+    labels: HashMap<Box<str>, usize>,
+    lcount: usize,
 }
 
 impl Compiler {
     pub fn compile(
-        &mut self,
+        mut self,
         stmt: Vec<Rc<Atom>>,
-    ) -> Result<(Vec<(Box<str>, usize)>, Vec<OpCode>), Error> {
+    ) -> Result<(Vec<(Box<str>, usize)>, OpCodes), Error> {
         //
         // Compile the statements.
         //
-        let blocks: Vec<_> = stmt
-            .into_iter()
+        stmt.into_iter()
             .map(|v| self.compile_defun(v))
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<(), _>>()?;
         //
-        // Serialize the blocks.
+        // Serialize the streams.
         //
-        let result = blocks.into_iter().fold(
+        let (index, stream) = self.blocks.into_iter().fold(
             (Vec::new(), Vec::new()),
-            |(mut offsets, mut opcodes), (name, block)| {
+            |(mut offsets, mut opcodes), (name, ctxt)| {
                 offsets.push((name, opcodes.len()));
-                opcodes.extend(block);
+                opcodes.extend(ctxt.stream);
                 (offsets, opcodes)
             },
         );
         //
+        // Convert the stream to opcodes.
+        //
+        let opcodes = stream
+            .into_iter()
+            .map(|v| match v {
+                LabelOrOpCode::Branch(v) => {
+                    let address = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
+                    Ok(OpCode::Br(address))
+                }
+                LabelOrOpCode::BranchIfNot(v) => {
+                    let address = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
+                    Ok(OpCode::Brn(address))
+                }
+                LabelOrOpCode::Funcall(v) => {
+                    //
+                    // Get the address of the label.
+                    //
+                    let address = index
+                        .iter()
+                        .find_map(|(k, a)| (k == &v).then_some(a))
+                        .copied()
+                        .ok_or(Error::InvalidLabel(v))?;
+                    //
+                    // Generate the BRL opcode.
+                    //
+                    Ok(OpCode::Psh(Immediate::Funcall(address)))
+                }
+                LabelOrOpCode::OpCode(v) => Ok(v),
+            })
+            .collect::<Result<_, Error>>()?;
+        //
         // Done.
         //
-        Ok(result)
+        Ok((index, opcodes))
     }
 
-    fn compile_defun(&mut self, atom: Rc<Atom>) -> Result<(Box<str>, Vec<OpCode>), Error> {
-        let mut opcodes = Vec::default();
+    fn compile_defun(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
+        let mut ctxt = Context::default();
         //
         // Split the function call.
         //
@@ -77,7 +189,7 @@ impl Compiler {
         //
         // Make sure the function does not exist.
         //
-        if self.labels.contains_key(name.as_ref()) {
+        if self.defuns.contains(name.as_ref()) {
             return Err(Error::FunctionAlreadyDefined(name.clone()));
         }
         //
@@ -89,104 +201,172 @@ impl Compiler {
         //
         // Track the function arguments.
         //
-        let argcnt = self.track_arguments(0, args.clone())?;
-        self.stackn = argcnt;
+        let argcnt = ctxt.track(args.clone())?;
         //
-        // Save the function address.
+        // Track the function definition.
         //
-        let index = self.labels.len();
-        self.labels.insert(name.clone(), (index, argcnt));
+        self.defuns.insert(name.clone());
         //
         // Rotate the arguments and the return address.
         //
         if argcnt > 0 {
-            opcodes.push(OpCode::Rot(self.locals.len() + 1));
+            ctxt.stream.push(OpCode::Rot(argcnt + 1).into());
         }
         //
         // Compile the statements.
         //
-        let mut opcodes = self.compile_statements(0, rem.clone(), opcodes)?;
+        self.compile_statements(&mut ctxt, 0, rem.clone())?;
         //
         // Pop the arguments.
         //
         if argcnt > 0 {
-            opcodes.push(OpCode::Rot(argcnt + 1));
-            opcodes.push(OpCode::Pop(argcnt));
+            ctxt.stream.push(OpCode::Rot(argcnt + 1).into());
+            ctxt.stream.push(OpCode::Pop(argcnt).into());
         }
         //
         // Inject the return call.
         //
-        opcodes.push(OpCode::Ret);
-        self.stackn -= 1;
+        ctxt.stream.push(OpCode::Ret.into());
         //
-        // Clear the local mapping.
+        // Save the block.
         //
-        self.locals.clear();
+        self.blocks.push((name.clone(), ctxt));
         //
         // Done.
         //
-        Ok((name.clone(), opcodes))
+        Ok(())
+    }
+
+    fn compile_lambda(&mut self, name: Box<str>, atom: Rc<Atom>) -> Result<(), Error> {
+        let mut ctxt = Context::default();
+        //
+        // Split the lambda call.
+        //
+        let Atom::Pair(args, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Track the function arguments.
+        //
+        let argcnt = ctxt.track(args.clone())?;
+        //
+        // Rotate the arguments and the return address.
+        //
+        if argcnt > 0 {
+            ctxt.stream.push(OpCode::Rot(argcnt + 1).into());
+        }
+        //
+        // Compile the statements.
+        //
+        self.compile_statements(&mut ctxt, 0, rem.clone())?;
+        //
+        // Pop the arguments.
+        //
+        if argcnt > 0 {
+            ctxt.stream.push(OpCode::Rot(argcnt + 1).into());
+            ctxt.stream.push(OpCode::Pop(argcnt).into());
+        }
+        //
+        // Inject the return call.
+        //
+        ctxt.stream.push(OpCode::Ret.into());
+        //
+        // Save the block.
+        //
+        self.blocks.push((name, ctxt));
+        //
+        // Done.
+        //
+        Ok(())
     }
 
     pub(crate) fn compile_funcall(
         &mut self,
+        ctxt: &mut Context,
         atom: Rc<Atom>,
-        opcodes: Vec<OpCode>,
-    ) -> Result<Vec<OpCode>, Error> {
+    ) -> Result<(), Error> {
         //
         // Split the function call.
         //
-        let Atom::Pair(a, b) = atom.as_ref() else {
+        let Atom::Pair(sym, rem) = atom.as_ref() else {
             return Err(Error::ExpectedFunctionCall);
         };
         //
         // Get the function symbol.
         //
-        let Atom::Symbol(s) = a.as_ref() else {
+        let Atom::Symbol(sym) = sym.as_ref() else {
             return Err(Error::ExpectedSymbol);
         };
         //
         // Process the symbol.
         //
-        match s.as_ref() {
+        match sym.as_ref() {
             //
             // Arithmetics.
             //
             "+" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Add);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Add.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             ">=" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Ge);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Ge.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             ">" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Gt);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Gt.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             "<=" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Le);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Le.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             "<" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Lt);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Lt.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             "-" => {
-                let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                opcodes.push(OpCode::Sub);
-                self.stackn -= 2;
-                Ok(opcodes)
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Sub.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
+            }
+            //
+            // Quote operation.
+            //
+            "quote" => {
+                self.compile_quote(ctxt, rem.clone())?;
+                Ok(())
+            }
+            //
+            // List operations.
+            //
+            "car" => {
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Car.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
+            }
+            "cdr" => {
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Cdr.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
+            }
+            "cons" => {
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                ctxt.stream.push(OpCode::Cons.into());
+                ctxt.stackn -= argcnt;
+                Ok(())
             }
             //
             // Control flow: if.
@@ -195,24 +375,20 @@ impl Compiler {
                 //
                 // Unpack the condition.
                 //
-                let Atom::Pair(cond, args) = b.as_ref() else {
+                let Atom::Pair(cond, args) = rem.as_ref() else {
                     return Err(Error::ExpectedPair);
                 };
                 //
                 // Compile the condition.
                 //
-                let mut opcodes = self.compile_value(cond.clone(), opcodes)?;
-                self.stackn -= 1;
+                self.compile_value(ctxt, cond.clone())?;
+                ctxt.stackn -= 1;
                 //
                 // Unpack THEN.
                 //
                 let Atom::Pair(then, args) = args.as_ref() else {
                     return Err(Error::ExpectedPair);
                 };
-                //
-                // Compile THEN.
-                //
-                let then_opcodes = self.compile_value(then.clone(), Vec::new())?;
                 //
                 // Unpack ELSE.
                 //
@@ -222,33 +398,45 @@ impl Compiler {
                     _ => return Err(Error::ExpectedPair),
                 };
                 //
+                // Generate the branch to the else block.
+                //
+                let name = self.label("BEGIN_ELSE");
+                let start = ctxt.stream.len();
+                let label = LabelOrOpCode::BranchIfNot(name.clone());
+                ctxt.stream.push(label);
+                //
+                // Compile THEN.
+                //
+                self.compile_value(ctxt, then.clone())?;
+                //
                 // Ignore the stack value for the THEN branch.
                 //
-                self.stackn -= 1;
+                ctxt.stackn -= 1;
                 //
-                // Generate the branch.
+                // Track the label.
                 //
-                opcodes.push(OpCode::Brn(then_opcodes.len() + 2));
+                let delta = (ctxt.stream.len() - start) + 1;
+                self.labels.insert(name, delta);
                 //
-                // Append the THEN opcodes.
+                // Generate the branch past the else block.
                 //
-                opcodes.extend_from_slice(&then_opcodes);
+                let name = self.label("END_ELSE");
+                let start = ctxt.stream.len();
+                let label = LabelOrOpCode::Branch(name.clone());
+                ctxt.stream.push(label);
                 //
                 // Compile ELSE.
                 //
-                let else_opcodes = self.compile_value(else_.clone(), Vec::new())?;
+                self.compile_value(ctxt, else_.clone())?;
                 //
-                // Generate the branch.
+                // Track the label.
                 //
-                opcodes.push(OpCode::Br(else_opcodes.len() + 1));
-                //
-                // Append the ELSE opcodes.
-                //
-                opcodes.extend_from_slice(&else_opcodes);
+                let delta = ctxt.stream.len() - start;
+                self.labels.insert(name, delta);
                 //
                 // Done.
                 //
-                Ok(opcodes)
+                Ok(())
             }
             //
             // Value binding: let.
@@ -257,79 +445,158 @@ impl Compiler {
                 //
                 // Split the atom.
                 //
-                let Atom::Pair(bindings, stmts) = b.as_ref() else {
+                let Atom::Pair(bindings, stmts) = rem.as_ref() else {
                     return Err(Error::ExpectedPair);
                 };
                 //
                 // Compile the bindings.
                 //
-                let pre = self.stackn;
-                let opcodes = self.compile_bindings(bindings.clone(), opcodes)?;
-                let argcnt = self.stackn - pre;
+                let argcnt = self.compile_bindings(ctxt, 0, bindings.clone())?;
                 //
                 // Compile the statements.
                 //
-                let mut opcodes = self.compile_statements(0, stmts.clone(), opcodes)?;
+                self.compile_statements(ctxt, 0, stmts.clone())?;
                 //
                 // Pop the bindings.
                 //
                 if argcnt > 0 {
-                    opcodes.push(OpCode::Rot(argcnt + 1));
-                    opcodes.push(OpCode::Pop(argcnt));
+                    ctxt.stream.push(OpCode::Rot(argcnt + 1).into());
+                    ctxt.stream.push(OpCode::Pop(argcnt).into());
                 }
                 //
                 // Clear the bindings from the locals.
                 //
-                self.clear_bindings(bindings.clone())?;
+                self.clear_bindings(ctxt, bindings.clone())?;
                 //
                 // Done.
                 //
-                Ok(opcodes)
+                Ok(())
             }
             //
             // Function definition are forbidden.
             //
             "def" => Err(Error::FunctionDefinitionTopLevelOnly),
             //
-            // Other symbol.
+            // Lambda definition.
             //
-            symbol => match self.labels.get(symbol).copied() {
-                Some((index, arglen)) => {
-                    let mut opcodes = self.compile_arguments(b.clone(), opcodes)?;
-                    opcodes.push(OpCode::Brl(index));
-                    self.stackn -= arglen;
-                    Ok(opcodes)
-                }
-                None => Err(Error::InvalidSymbol(symbol.into())),
-            },
+            "\\" => {
+                //
+                // Generate a name for the lambda.
+                //
+                let name = self.label("LAMBDA");
+                //
+                // Generate the lambda.
+                //
+                self.compile_lambda(name.clone(), rem.clone())?;
+                //
+                // Generate the function call.
+                //
+                ctxt.stream.push(LabelOrOpCode::Funcall(name));
+                ctxt.stream.push(OpCode::Pak(1).into());
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            //
+            // Global function.
+            //
+            _ if self.defuns.contains(sym) => {
+                //
+                // Compile the arguments.
+                //
+                let arglen = self.compile_arguments(ctxt, 0, rem.clone())?;
+                //
+                // Generate the funcall label.
+                //
+                ctxt.stream.push(LabelOrOpCode::Funcall(sym.clone()));
+                //
+                // Generate the call opcode.
+                //
+                ctxt.stream.push(OpCode::Call.into());
+                //
+                // Update the stack tracker.
+                //
+                ctxt.stackn -= arglen;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            //
+            // Other.
+            //
+            symbol => {
+                //
+                // Make sure it's a known symbol.
+                //
+                let Some(index) = ctxt.locals.get(symbol).and_then(|v| v.last()).copied() else {
+                    return Err(Error::InvalidSymbol(sym.clone()));
+                };
+                //
+                // Compile the arguments.
+                //
+                let argcnt = self.compile_arguments(ctxt, 0, rem.clone())?;
+                //
+                // Grab the closure.
+                //
+                let position = ctxt.stackn - index;
+                ctxt.stream.push(OpCode::Get(position).into());
+                //
+                // Update the stack tracker.
+                //
+                ctxt.stackn += 1;
+                //
+                // Generate the call opcode.
+                //
+                ctxt.stream.push(OpCode::Call.into());
+                //
+                // Update the stack tracker.
+                //
+                ctxt.stackn -= argcnt + 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
         }
     }
 
     fn compile_arguments(
         &mut self,
+        ctxt: &mut Context,
+        indx: usize,
         atom: Rc<Atom>,
-        opcodes: Vec<OpCode>,
-    ) -> Result<Vec<OpCode>, Error> {
-        match atom.as_ref() {
-            Atom::Nil => Ok(opcodes),
-            Atom::Pair(a, b) => {
-                let opcodes = self.compile_value(a.clone(), opcodes)?;
-                self.compile_arguments(b.clone(), opcodes)
-            }
-            _ => Err(Error::ExpectedPair),
-        }
+    ) -> Result<usize, Error> {
+        //
+        // Split the atom.
+        //
+        let (atom, rest) = match atom.as_ref() {
+            Atom::Nil => return Ok(indx),
+            Atom::Pair(atom, rest) => (atom, rest),
+            _ => return Err(Error::ExpectedPair),
+        };
+        //
+        // Compile the first argument.
+        //
+        self.compile_value(ctxt, atom.clone())?;
+        //
+        // Compile the remaining arguments.
+        //
+        self.compile_arguments(ctxt, indx + 1, rest.clone())
     }
 
     fn compile_bindings(
         &mut self,
+        ctxt: &mut Context,
+        indx: usize,
         atom: Rc<Atom>,
-        opcodes: Vec<OpCode>,
-    ) -> Result<Vec<OpCode>, Error> {
+    ) -> Result<usize, Error> {
         //
         // Split the atom.
         //
         let (binding, rem) = match atom.as_ref() {
-            Atom::Nil => return Ok(opcodes),
+            Atom::Nil => return Ok(indx),
             Atom::Pair(binding, rem) => (binding, rem),
             _ => return Err(Error::ExpectedPair),
         };
@@ -348,21 +615,21 @@ impl Compiler {
         //
         // Compile the statement.
         //
-        let opcodes = self.compile_value(stmt.clone(), opcodes)?;
+        self.compile_value(ctxt, stmt.clone())?;
         //
         // Save the symbol's index.
         //
-        self.locals
+        ctxt.locals
             .entry(symbol.clone())
             .or_default()
-            .push(self.stackn - 1);
+            .push(ctxt.stackn - 1);
         //
         // Process the remaining bindings.
         //
-        self.compile_bindings(rem.clone(), opcodes)
+        self.compile_bindings(ctxt, indx + 1, rem.clone())
     }
 
-    fn clear_bindings(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
+    fn clear_bindings(&mut self, ctxt: &mut Context, atom: Rc<Atom>) -> Result<(), Error> {
         //
         // Split the atom.
         //
@@ -386,24 +653,24 @@ impl Compiler {
         //
         // Clear the binding.
         //
-        self.locals.entry(symbol.clone()).or_default().pop();
+        ctxt.locals.entry(symbol.clone()).or_default().pop();
         //
         // Process the remaining bindings.
         //
-        self.clear_bindings(rem.clone())
+        self.clear_bindings(ctxt, rem.clone())
     }
 
     fn compile_statements(
         &mut self,
+        ctxt: &mut Context,
         indx: usize,
         atom: Rc<Atom>,
-        mut opcodes: Vec<OpCode>,
-    ) -> Result<Vec<OpCode>, Error> {
+    ) -> Result<(), Error> {
         //
         // Split the atom.
         //
         let (atom, rest) = match atom.as_ref() {
-            Atom::Nil => return Ok(opcodes),
+            Atom::Nil => return Ok(()),
             Atom::Pair(atom, rest) => (atom, rest),
             _ => return Err(Error::ExpectedPair),
         };
@@ -411,88 +678,100 @@ impl Compiler {
         // Drop the previous result.
         //
         if indx > 0 {
-            opcodes.push(OpCode::Pop(1));
-            self.stackn -= 1;
+            ctxt.stream.push(OpCode::Pop(1).into());
+            ctxt.stackn -= 1;
         }
         //
         // Compile the statement.
         //
-        let opcodes = self.compile_value(atom.clone(), opcodes)?;
+        self.compile_value(ctxt, atom.clone())?;
         //
         // Process the remaining statements.
         //
-        self.compile_statements(indx + 1, rest.clone(), opcodes)
+        self.compile_statements(ctxt, indx + 1, rest.clone())
     }
 
-    fn compile_value(
-        &mut self,
-        atom: Rc<Atom>,
-        mut opcodes: Vec<OpCode>,
-    ) -> Result<Vec<OpCode>, Error> {
+    fn compile_quote(&mut self, ctxt: &mut Context, atom: Rc<Atom>) -> Result<(), Error> {
         match atom.as_ref() {
             Atom::Nil => {
-                opcodes.push(OpCode::Psh(Immediate::Nil));
-                self.stackn += 1;
-                Ok(opcodes)
+                ctxt.stream.push(OpCode::Psh(Immediate::Nil).into());
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::True => {
-                opcodes.push(OpCode::Psh(Immediate::True));
-                self.stackn += 1;
-                Ok(opcodes)
+                ctxt.stream.push(OpCode::Psh(Immediate::True).into());
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::Char(v) => {
-                opcodes.push(OpCode::Psh(Immediate::Char(*v)));
-                self.stackn += 1;
-                Ok(opcodes)
+                ctxt.stream.push(OpCode::Psh(Immediate::Char(*v)).into());
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::Number(v) => {
-                opcodes.push(OpCode::Psh(Immediate::Number(*v)));
-                self.stackn += 1;
-                Ok(opcodes)
+                ctxt.stream.push(OpCode::Psh(Immediate::Number(*v)).into());
+                ctxt.stackn += 1;
+                Ok(())
+            }
+            Atom::Pair(car, cdr) => {
+                self.compile_quote(ctxt, car.clone())?;
+                self.compile_quote(ctxt, cdr.clone())?;
+                ctxt.stream.push(OpCode::Cons.into());
+                ctxt.stackn -= 1;
+                Ok(())
+            }
+            Atom::String(_) => todo!(),
+            Atom::Symbol(_) => todo!(),
+            Atom::Wildcard => todo!(),
+        }
+    }
+
+    fn compile_value(&mut self, ctxt: &mut Context, atom: Rc<Atom>) -> Result<(), Error> {
+        match atom.as_ref() {
+            Atom::Nil => {
+                ctxt.stream.push(OpCode::Psh(Immediate::Nil).into());
+                ctxt.stackn += 1;
+                Ok(())
+            }
+            Atom::True => {
+                ctxt.stream.push(OpCode::Psh(Immediate::True).into());
+                ctxt.stackn += 1;
+                Ok(())
+            }
+            Atom::Char(v) => {
+                ctxt.stream.push(OpCode::Psh(Immediate::Char(*v)).into());
+                ctxt.stackn += 1;
+                Ok(())
+            }
+            Atom::Number(v) => {
+                ctxt.stream.push(OpCode::Psh(Immediate::Number(*v)).into());
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::Pair(_, _) => {
-                let opcodes = self.compile_funcall(atom, opcodes)?;
-                self.stackn += 1;
-                Ok(opcodes)
+                self.compile_funcall(ctxt, atom)?;
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::String(_) => todo!(),
             Atom::Symbol(v) => {
-                let index = *self
+                let index = *ctxt
                     .locals
                     .get(v)
                     .and_then(|v| v.last())
                     .ok_or(Error::InvalidSymbol(v.clone()))?;
-                let position = self.stackn - index;
-                opcodes.push(OpCode::Pck(position));
-                self.stackn += 1;
-                Ok(opcodes)
+                let position = ctxt.stackn - index;
+                ctxt.stream.push(OpCode::Get(position).into());
+                ctxt.stackn += 1;
+                Ok(())
             }
             Atom::Wildcard => todo!(),
         }
     }
 
-    fn track_arguments(&mut self, index: usize, atom: Rc<Atom>) -> Result<usize, Error> {
-        //
-        // Split the atom.
-        //
-        let (arg, rem) = match atom.as_ref() {
-            Atom::Nil => return Ok(index),
-            Atom::Pair(arg, rem) => (arg, rem),
-            _ => return Err(Error::ExpectedPair),
-        };
-        //
-        // Make sure the argument is a symbol.
-        //
-        let Atom::Symbol(v) = arg.as_ref() else {
-            return Err(Error::ExpectedSymbol);
-        };
-        //
-        // Update the argument map.
-        //
-        self.locals.entry(v.to_owned()).or_default().push(index);
-        //
-        // Process the rest of the arguments.
-        //
-        self.track_arguments(index + 1, rem.clone())
+    fn label(&mut self, prefix: &str) -> Box<str> {
+        let label = format!("{prefix}_{:04}", self.lcount).into_boxed_str();
+        self.lcount += 1;
+        label
     }
 }

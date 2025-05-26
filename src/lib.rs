@@ -14,11 +14,12 @@ lalrpop_mod!(
 // Modules.
 //
 
+pub mod atom;
 pub mod compiler;
 pub mod error;
+pub mod heap;
 pub mod opcodes;
 pub mod stack;
-pub mod types;
 
 //
 // Tests.

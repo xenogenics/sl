@@ -1,7 +1,10 @@
+use std::rc::Rc;
+
 use clap::{arg, Parser};
 use mnml::{
+    heap,
     opcodes::{Immediate, OpCode},
-    stack::Stack,
+    stack::{Stack, Value},
 };
 use thiserror::Error;
 
@@ -61,7 +64,7 @@ fn main() -> Result<(), Error> {
     //
     // Push the initial return value.
     //
-    stack.push(Immediate::Link(state.1.len()));
+    stack.push(Value::Link(state.1.len()).into());
     //
     // Interpreter loop.
     //
@@ -76,61 +79,164 @@ fn main() -> Result<(), Error> {
         // Execute the opcode.
         //
         match state.1[pc] {
+            //
+            // Arithmetics.
+            //
             OpCode::Add => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push(Immediate::Number(a + b));
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::Number(a + b)).into());
             }
             OpCode::Ge => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push((a >= b).into());
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::from(a >= b)).into());
             }
             OpCode::Gt => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push((a > b).into());
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::from(a > b)).into());
             }
             OpCode::Le => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push((a <= b).into());
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::from(a <= b)).into());
             }
             OpCode::Lt => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push((a < b).into());
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::from(a < b)).into());
             }
             OpCode::Sub => {
-                let b: i64 = stack.pop().into();
-                let a: i64 = stack.pop().into();
-                stack.push(Immediate::Number(a - b));
+                let b = stack.pop().immediate().number();
+                let a = stack.pop().immediate().number();
+                stack.push(Value::from(Immediate::Number(a - b)).into());
             }
+            //
+            // List operations.
+            //
+            OpCode::Car => {
+                let result = match stack.pop() {
+                    Value::Heap(value) => match value.as_ref() {
+                        heap::Value::Pair(value, _) => match value.as_ref() {
+                            heap::Value::Closure(v) => Value::Closure(v.clone()),
+                            heap::Value::Immediate(v) => Value::Immediate(*v),
+                            _ => Value::Heap(value.clone()),
+                        },
+                        _ => Immediate::Nil.into(),
+                    },
+                    _ => Immediate::Nil.into(),
+                };
+                stack.push(result);
+            }
+            OpCode::Cdr => {
+                let result = match stack.pop() {
+                    Value::Heap(value) => match value.as_ref() {
+                        heap::Value::Pair(_, value) => match value.as_ref() {
+                            heap::Value::Closure(v) => Value::Closure(v.clone()),
+                            heap::Value::Immediate(v) => Value::Immediate(*v),
+                            _ => Value::Heap(value.clone()),
+                        },
+                        _ => Immediate::Nil.into(),
+                    },
+                    _ => Immediate::Nil.into(),
+                };
+                stack.push(result);
+            }
+            OpCode::Cons => {
+                let (a, b) = match (stack.pop(), stack.pop()) {
+                    (Value::Closure(b), Value::Closure(a)) => {
+                        let a = Rc::new(heap::Value::Closure(a));
+                        let b = Rc::new(heap::Value::Closure(b));
+                        (a, b)
+                    }
+                    (Value::Closure(b), Value::Heap(a)) => {
+                        let b = Rc::new(heap::Value::Closure(b));
+                        (a.clone(), b)
+                    }
+                    (Value::Closure(b), Value::Immediate(a)) => {
+                        let a = Rc::new(heap::Value::Immediate(a));
+                        let b = Rc::new(heap::Value::Closure(b));
+                        (a, b)
+                    }
+                    (Value::Heap(b), Value::Closure(a)) => {
+                        let a = Rc::new(heap::Value::Closure(a));
+                        (a, b.clone())
+                    }
+                    (Value::Heap(b), Value::Heap(a)) => (a.clone(), b.clone()),
+                    (Value::Heap(b), Value::Immediate(a)) => {
+                        let a = Rc::new(heap::Value::Immediate(a));
+                        (a, b.clone())
+                    }
+                    (Value::Immediate(b), Value::Closure(a)) => {
+                        let a = Rc::new(heap::Value::Closure(a));
+                        let b = Rc::new(heap::Value::Immediate(b));
+                        (a, b)
+                    }
+                    (Value::Immediate(b), Value::Heap(a)) => {
+                        let b = Rc::new(heap::Value::Immediate(b));
+                        (a.clone(), b)
+                    }
+                    (Value::Immediate(b), Value::Immediate(a)) => {
+                        let a = Rc::new(heap::Value::Immediate(a));
+                        let b = Rc::new(heap::Value::Immediate(b));
+                        (a, b)
+                    }
+                    _ => panic!("Return link cannot be pushed to the heap"),
+                };
+                stack.push(Value::Heap(Rc::new(heap::Value::Pair(a, b))));
+            }
+            //
+            // Control flow.
+            //
             OpCode::Br(v) => {
                 pc = pc + v;
                 continue;
             }
-            OpCode::Brl(v) => {
-                stack.push(Immediate::Link(pc + 1));
-                pc = state.0[v].1;
+            OpCode::Call => {
+                //
+                // Decode the call address.
+                //
+                let address = match stack.pop() {
+                    Value::Closure(v) => {
+                        stack.unpack(v);
+                        stack.pop().immediate().funcall()
+                    }
+                    Value::Immediate(Immediate::Funcall(v)) => v,
+                    _ => panic!("Expected a function address or closure"),
+                };
+                //
+                // Push the return link and jump.
+                //
+                stack.push(Value::Link(pc + 1).into());
+                pc = address;
                 continue;
             }
-            OpCode::Brn(v) if stack.pop().is_nil() => {
-                pc += v;
-                continue;
+
+            OpCode::Brn(v) => {
+                if matches!(stack.pop(), Value::Immediate(Immediate::Nil)) {
+                    pc += v;
+                    continue;
+                }
             }
-            OpCode::Brn(_) => (),
             OpCode::Hlt => todo!(),
             OpCode::Ret => {
-                pc = stack.unlink().into();
+                pc = stack.unlink().link();
                 continue;
             }
+            //
+            // Stack operations.
+            //
             OpCode::Dup(v) => stack.dup(v),
-            OpCode::Pck(v) => stack.pick(v),
+            OpCode::Get(v) => stack.get(v),
+            OpCode::Pak(v) => stack.pack(v),
             OpCode::Pop(v) => stack.drop(v),
-            OpCode::Psh(v) => stack.push(v),
+            OpCode::Psh(v) => stack.push(Value::from(v).into()),
             OpCode::Rot(n) => stack.rotate(n),
             OpCode::Swp => stack.swap(),
+            //
+            // Memory operations.
+            //
             OpCode::Ld => todo!(),
             OpCode::St => todo!(),
         }

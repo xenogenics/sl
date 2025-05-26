@@ -1,0 +1,5 @@
+(def main ()
+  (let ((add . (\ (a b) (+ a b)))
+        (sub . (\ (a b) (- a b))))
+    (add (sub 4 3) (sub 5 2))
+  ))

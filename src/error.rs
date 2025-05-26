@@ -6,6 +6,8 @@ pub enum Error {
     ExpectedFunctionCall,
     #[error("Expected function definition")]
     ExpectedFunctionDefinition,
+    #[error("Expected lambda definition")]
+    ExpectedLambdaDefinition,
     #[error("Expected pair")]
     ExpectedPair,
     #[error("Expected symbol")]
@@ -14,6 +16,8 @@ pub enum Error {
     FunctionAlreadyDefined(Box<str>),
     #[error("Function definition can only happen at the top level")]
     FunctionDefinitionTopLevelOnly,
+    #[error("Invalid label: {0}")]
+    InvalidLabel(Box<str>),
     #[error("Invalid symbol: {0}")]
     InvalidSymbol(Box<str>),
     #[error(transparent)]
