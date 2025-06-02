@@ -94,4 +94,29 @@ impl Atom {
     pub fn cons(a: Rc<Atom>, b: Rc<Atom>) -> Rc<Atom> {
         Self::Pair(a, b).into()
     }
+
+    pub fn iter(self: &Rc<Atom>) -> impl std::iter::Iterator<Item = Rc<Atom>> {
+        AtomIterator(self.clone())
+    }
+}
+
+//
+// Iterator.
+//
+
+pub struct AtomIterator(Rc<Atom>);
+
+impl std::iter::Iterator for AtomIterator {
+    type Item = Rc<Atom>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0.as_ref() {
+            Atom::Pair(car, cdr) => {
+                let value = car.clone();
+                self.0 = cdr.clone();
+                Some(value)
+            }
+            _ => None,
+        }
+    }
 }

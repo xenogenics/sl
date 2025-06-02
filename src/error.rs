@@ -22,4 +22,6 @@ pub enum Error {
     InvalidSymbol(Box<str>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Main endpoint not defined")]
+    MainNotDefined,
 }
