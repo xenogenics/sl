@@ -8,6 +8,8 @@ struct Arguments {
     file: String,
     #[arg(short, long, default_value_t = 128)]
     stack_size: usize,
+    #[arg(long)]
+    trace: bool,
 }
 
 #[derive(Debug, Error)]
@@ -38,7 +40,7 @@ fn main() -> Result<(), Error> {
     //
     // Build the virtual machine.
     //
-    let mut vm = VirtualMachine::new(args.stack_size);
+    let mut vm = VirtualMachine::new(args.stack_size, args.trace);
     //
     // Run the binary.
     //

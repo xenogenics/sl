@@ -98,6 +98,10 @@ impl Atom {
     pub fn iter(self: &Rc<Atom>) -> impl std::iter::Iterator<Item = Rc<Atom>> {
         AtomIterator(self.clone())
     }
+
+    pub fn into_iter(self: Rc<Atom>) -> impl std::iter::Iterator<Item = Rc<Atom>> {
+        AtomIterator(self)
+    }
 }
 
 //

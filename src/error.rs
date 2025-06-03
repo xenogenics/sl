@@ -10,6 +10,8 @@ pub enum Error {
     ExpectedLambdaDefinition,
     #[error("Expected pair")]
     ExpectedPair,
+    #[error("Expected statement")]
+    ExpectedStatement,
     #[error("Expected symbol")]
     ExpectedSymbol,
     #[error("Function already defined: {0}")]
@@ -24,4 +26,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Main endpoint not defined")]
     MainNotDefined,
+    #[error("Unresolved symbol: {0}")]
+    UnresolvedSymbol(Box<str>),
 }

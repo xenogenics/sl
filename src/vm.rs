@@ -9,12 +9,14 @@ use crate::{
 
 pub struct VirtualMachine {
     stack: Stack,
+    trace: bool,
 }
 
 impl VirtualMachine {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, trace: bool) -> Self {
         Self {
             stack: Stack::new(capacity),
+            trace,
         }
     }
 
@@ -45,6 +47,13 @@ impl VirtualMachine {
             //
             if pc >= ops.len() {
                 break;
+            }
+            //
+            // Print trace.
+            //
+            if self.trace {
+                println!("{:?}", self.stack);
+                println!("{pc:04} {:?}", ops[pc]);
             }
             //
             // Execute the opcode.
