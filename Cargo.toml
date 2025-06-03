@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
+name = "mnml"
+path = "bin/mnml.rs"
+
+[[bin]]
 name = "mnmlc"
 path = "bin/mnmlc.rs"
 

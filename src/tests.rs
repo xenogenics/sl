@@ -47,8 +47,8 @@ fn single_builtin() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Add.into(),
         ]
     );
@@ -64,10 +64,10 @@ fn nested_builtin() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(3)).into(),
-            OpCode::Psh(Immediate::Number(4)).into(),
-            OpCode::Sub.into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(4)).into(),
+            OpCode::Psh(Immediate::Number(3)).into(),
+            OpCode::Sub.into(),
             OpCode::Add.into(),
         ]
     );
@@ -83,12 +83,12 @@ fn if_then() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Psh(Immediate::Number(0)).into(),
+            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Lt.into(),
             LabelOrOpCode::BranchIfNot("BEGIN_ELSE_0000".to_owned().into_boxed_str()),
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Add.into(),
             LabelOrOpCode::Branch("END_ELSE_0001".to_owned().into_boxed_str()),
             OpCode::Psh(Immediate::Nil).into(),
@@ -109,16 +109,16 @@ fn if_then_else() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Psh(Immediate::Number(0)).into(),
+            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Lt.into(),
             LabelOrOpCode::BranchIfNot("BEGIN_ELSE_0000".to_owned().into_boxed_str()),
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Add.into(),
             LabelOrOpCode::Branch("END_ELSE_0001".to_owned().into_boxed_str()),
-            OpCode::Psh(Immediate::Number(4)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(4)).into(),
             OpCode::Sub.into(),
         ]
     );
@@ -137,16 +137,16 @@ fn nested_if_then() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Psh(Immediate::Number(0)).into(),
+            OpCode::Psh(Immediate::Number(3)).into(),
             OpCode::Lt.into(),
             LabelOrOpCode::BranchIfNot("BEGIN_ELSE_0000".to_owned().into_boxed_str()),
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(4)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Ge.into(),
             LabelOrOpCode::BranchIfNot("BEGIN_ELSE_0001".to_owned().into_boxed_str()),
-            OpCode::Psh(Immediate::Number(4)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(4)).into(),
             OpCode::Sub.into(),
             LabelOrOpCode::Branch("END_ELSE_0002".to_owned().into_boxed_str()),
             OpCode::Psh(Immediate::Nil).into(),
@@ -167,8 +167,8 @@ fn let_binding_with_a_single_constant() {
         context.stream(),
         &[
             OpCode::Psh(Immediate::Number(1)).into(),
-            OpCode::Get(1).into(),
             OpCode::Psh(Immediate::Number(1)).into(),
+            OpCode::Get(2).into(),
             OpCode::Add.into(),
             OpCode::Rot(2).into(),
             OpCode::Pop(1).into(),
@@ -189,11 +189,11 @@ fn let_binding_with_a_single_funcall() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
-            OpCode::Add.into(),
-            OpCode::Get(1).into(),
             OpCode::Psh(Immediate::Number(1)).into(),
+            OpCode::Add.into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
+            OpCode::Get(2).into(),
             OpCode::Add.into(),
             OpCode::Rot(2).into(),
             OpCode::Pop(1).into(),
@@ -214,12 +214,12 @@ fn let_binding_with_multiple_bindings() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Add.into(),
             OpCode::Psh(Immediate::Number(2)).into(),
-            OpCode::Get(2).into(),
-            OpCode::Get(2).into(),
+            OpCode::Get(1).into(),
+            OpCode::Get(3).into(),
             OpCode::Add.into(),
             OpCode::Rot(3).into(),
             OpCode::Pop(2).into(),
@@ -240,14 +240,14 @@ fn nested_let_bindings() {
     assert_eq!(
         context.stream(),
         &[
-            OpCode::Psh(Immediate::Number(1)).into(),
             OpCode::Psh(Immediate::Number(2)).into(),
+            OpCode::Psh(Immediate::Number(1)).into(),
+            OpCode::Add.into(),
+            OpCode::Psh(Immediate::Number(3)).into(),
+            OpCode::Get(2).into(),
             OpCode::Add.into(),
             OpCode::Get(1).into(),
-            OpCode::Psh(Immediate::Number(3)).into(),
-            OpCode::Add.into(),
-            OpCode::Get(2).into(),
-            OpCode::Get(2).into(),
+            OpCode::Get(3).into(),
             OpCode::Sub.into(),
             OpCode::Rot(2).into(),
             OpCode::Pop(1).into(),
@@ -287,8 +287,8 @@ fn def_multiple_statements() {
         result,
         vec![
             OpCode::Rot(4),
-            OpCode::Get(3),
-            OpCode::Get(3),
+            OpCode::Get(2),
+            OpCode::Get(2),
             OpCode::Add,
             OpCode::Pop(1),
             OpCode::Get(3),
@@ -316,8 +316,8 @@ fn def_with_main() {
             // ADD.
             //
             OpCode::Rot(4),
-            OpCode::Get(3),
-            OpCode::Get(3),
+            OpCode::Get(2),
+            OpCode::Get(2),
             OpCode::Add,
             OpCode::Pop(1),
             OpCode::Get(3),
@@ -329,9 +329,9 @@ fn def_with_main() {
             //
             // Main.
             //
-            OpCode::Psh(Immediate::Number(1)),
-            OpCode::Psh(Immediate::Number(2)),
             OpCode::Psh(Immediate::Number(3)),
+            OpCode::Psh(Immediate::Number(2)),
+            OpCode::Psh(Immediate::Number(1)),
             OpCode::Psh(Immediate::Funcall(0)),
             OpCode::Call,
             OpCode::Ret,
@@ -351,22 +351,22 @@ fn fibonacci() {
         result,
         vec![
             OpCode::Rot(2),                     // [ret0, N]
-            OpCode::Get(1),                     // [ret0, N, N]
-            OpCode::Psh(Immediate::Number(1)),  // [ret0, N, N, 1]
+            OpCode::Psh(Immediate::Number(1)),  // [ret0, N, 1]
+            OpCode::Get(2),                     // [ret0, N, 1, N]
             OpCode::Le,                         // [ret0, N, T/nil]
             OpCode::Brn(3),                     // [ret0, N]
             OpCode::Get(1),                     // [ret0, N, N]
             OpCode::Br(12),                     //
-            OpCode::Get(1),                     // [ret0, N, N]
-            OpCode::Psh(Immediate::Number(1)),  // [ret0, N, N, 1]
-            OpCode::Sub,                        // [ret0, N, N-1]
-            OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, N - 1, fun0]
-            OpCode::Call,                       // [ret0, N, N-1, ret1]
-            OpCode::Get(2),                     // [ret0, N, R0, N]
-            OpCode::Psh(Immediate::Number(2)),  // [ret0, N, R0, N, 2]
-            OpCode::Sub,                        // [ret0, N, R0, N-2]
-            OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, R0, N-2, fun0]
+            OpCode::Psh(Immediate::Number(2)),  // [ret0, N, 2]
+            OpCode::Get(2),                     // [ret0, N, 1, N]
+            OpCode::Sub,                        // [ret0, N, N-2]
+            OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, N-2, fun0]
             OpCode::Call,                       // [ret0, N, N-2, ret1]
+            OpCode::Psh(Immediate::Number(1)),  // [ret0, N, R0, 1]
+            OpCode::Get(3),                     // [ret0, N, R0, 1, N]
+            OpCode::Sub,                        // [ret0, N, R0, N-1]
+            OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, R0, N-1, fun0]
+            OpCode::Call,                       // [ret0, N, N-1, ret1]
             OpCode::Add,                        // [ret0, N, R0+R1]
             OpCode::Rot(2),                     // [ret0, R0+R1, N]
             OpCode::Pop(1),                     // [ret0, R0+R1]
@@ -402,11 +402,11 @@ fn lambda() {
             OpCode::Rot(2),                     // [ret0, a]
             OpCode::Psh(Immediate::Funcall(0)), // [ret0, a, fun0]
             OpCode::Pak(1),                     // [ret0, a, pak0]
-            OpCode::Get(2),                     // [ret0, a, pak0, a]
-            OpCode::Psh(Immediate::Number(1)),  // [ret0, a, pak0, a, 1]
-            OpCode::Psh(Immediate::Number(2)),  // [ret0, a, pak0, a, 1, 2]
-            OpCode::Get(4),                     // [ret0, a, pak0, a, 1, 2, pak0]
-            OpCode::Call,                       // [ret0, a, pak0, a, 1, 2, ret1]
+            OpCode::Psh(Immediate::Number(2)),  // [ret0, a, pak0, 2]
+            OpCode::Psh(Immediate::Number(1)),  // [ret0, a, pak0, 2, 1]
+            OpCode::Get(3),                     // [ret0, a, pak0, 2, 1, pak0]
+            OpCode::Call,                       // [ret0, a, pak0, 2, 1, ret1]
+            OpCode::Get(3),                     // [ret0, a, pak0, 3, a]
             OpCode::Sub,                        // [ret0, a, pak0, a-3]
             OpCode::Rot(2),                     // [ret0, a, a-3, pak0]
             OpCode::Pop(1),                     // [ret0, a, a-3]

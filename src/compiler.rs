@@ -22,7 +22,15 @@ pub(crate) struct Context {
 
 impl Context {
     fn track(&mut self, atom: Rc<Atom>) -> Result<usize, Error> {
-        atom.iter().enumerate().try_fold(0, |acc, (_, atom)| {
+        //
+        // Reverse the argument list.
+        //
+        let mut args = atom.iter().collect::<Vec<_>>();
+        args.reverse();
+        //
+        // Process the arguments right-to-left.
+        //
+        args.iter().enumerate().try_fold(0, |acc, (_, atom)| {
             //
             // Make sure the argument is a symbol.
             //
@@ -582,10 +590,21 @@ impl Compiler {
     }
 
     fn compile_arguments(&mut self, ctxt: &mut Context, atom: Rc<Atom>) -> Result<usize, Error> {
-        atom.iter().try_fold(0, |acc, atom| {
-            self.compile_value(ctxt, atom)?;
-            Ok(acc + 1)
-        })
+        //
+        // Reverse the argument list.
+        //
+        let mut args = atom.iter().collect::<Vec<_>>();
+        args.reverse();
+        //
+        // Evaluate the arguments right-to-left.
+        //
+        args.iter()
+            .cloned()
+            .try_for_each(|v| self.compile_value(ctxt, v))?;
+        //
+        // Done.
+        //
+        Ok(args.len())
     }
 
     fn compile_bindings(&mut self, ctxt: &mut Context, atom: Rc<Atom>) -> Result<usize, Error> {
@@ -684,8 +703,8 @@ impl Compiler {
                 Ok(())
             }
             Atom::Pair(car, cdr) => {
-                self.compile_quote(ctxt, car.clone())?;
                 self.compile_quote(ctxt, cdr.clone())?;
+                self.compile_quote(ctxt, car.clone())?;
                 ctxt.stream.push(OpCode::Cons.into());
                 ctxt.stackn -= 1;
                 Ok(())

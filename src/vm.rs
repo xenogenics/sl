@@ -54,34 +54,34 @@ impl VirtualMachine {
                 // Arithmetics.
                 //
                 OpCode::Add => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     let v = Value::from(Immediate::Number(a + b));
                     self.stack.push(v.into());
                 }
                 OpCode::Ge => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     self.stack.push(Value::from(Immediate::from(a >= b)).into());
                 }
                 OpCode::Gt => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     self.stack.push(Value::from(Immediate::from(a > b)).into());
                 }
                 OpCode::Le => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     self.stack.push(Value::from(Immediate::from(a <= b)).into());
                 }
                 OpCode::Lt => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     self.stack.push(Value::from(Immediate::from(a < b)).into());
                 }
                 OpCode::Sub => {
-                    let b = self.stack.pop().immediate().number();
                     let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
                     let v = Value::from(Immediate::Number(a - b));
                     self.stack.push(v.into());
                 }
@@ -118,39 +118,39 @@ impl VirtualMachine {
                 }
                 OpCode::Cons => {
                     let (a, b) = match (self.stack.pop(), self.stack.pop()) {
-                        (Value::Closure(b), Value::Closure(a)) => {
+                        (Value::Closure(a), Value::Closure(b)) => {
                             let a = Rc::new(heap::Value::Closure(a));
                             let b = Rc::new(heap::Value::Closure(b));
                             (a, b)
                         }
-                        (Value::Closure(b), Value::Heap(a)) => {
-                            let b = Rc::new(heap::Value::Closure(b));
-                            (a.clone(), b)
-                        }
-                        (Value::Closure(b), Value::Immediate(a)) => {
-                            let a = Rc::new(heap::Value::Immediate(a));
-                            let b = Rc::new(heap::Value::Closure(b));
-                            (a, b)
-                        }
-                        (Value::Heap(b), Value::Closure(a)) => {
+                        (Value::Closure(a), Value::Heap(b)) => {
                             let a = Rc::new(heap::Value::Closure(a));
                             (a, b.clone())
                         }
-                        (Value::Heap(b), Value::Heap(a)) => (a.clone(), b.clone()),
-                        (Value::Heap(b), Value::Immediate(a)) => {
-                            let a = Rc::new(heap::Value::Immediate(a));
-                            (a, b.clone())
-                        }
-                        (Value::Immediate(b), Value::Closure(a)) => {
+                        (Value::Closure(a), Value::Immediate(b)) => {
                             let a = Rc::new(heap::Value::Closure(a));
                             let b = Rc::new(heap::Value::Immediate(b));
                             (a, b)
                         }
-                        (Value::Immediate(b), Value::Heap(a)) => {
+                        (Value::Heap(a), Value::Closure(b)) => {
+                            let b = Rc::new(heap::Value::Closure(b));
+                            (a.clone(), b)
+                        }
+                        (Value::Heap(a), Value::Heap(b)) => (a.clone(), b.clone()),
+                        (Value::Heap(a), Value::Immediate(b)) => {
                             let b = Rc::new(heap::Value::Immediate(b));
                             (a.clone(), b)
                         }
-                        (Value::Immediate(b), Value::Immediate(a)) => {
+                        (Value::Immediate(a), Value::Closure(b)) => {
+                            let a = Rc::new(heap::Value::Immediate(a));
+                            let b = Rc::new(heap::Value::Closure(b));
+                            (a, b)
+                        }
+                        (Value::Immediate(a), Value::Heap(b)) => {
+                            let a = Rc::new(heap::Value::Immediate(a));
+                            (a, b.clone())
+                        }
+                        (Value::Immediate(a), Value::Immediate(b)) => {
                             let a = Rc::new(heap::Value::Immediate(a));
                             let b = Rc::new(heap::Value::Immediate(b));
                             (a, b)
