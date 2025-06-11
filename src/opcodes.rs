@@ -51,11 +51,11 @@ pub enum OpCode {
     // Arithmetics.
     //
     Add,
+    Sub,
     Ge,
     Gt,
     Le,
     Lt,
-    Sub,
     //
     // Logic operations.
     //

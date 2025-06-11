@@ -186,6 +186,18 @@ impl Compiler {
         })
     }
 
+    fn label(&mut self, prefix: &str) -> Box<str> {
+        let label = format!("{prefix}_{:04}", self.lcount).into_boxed_str();
+        self.lcount += 1;
+        label
+    }
+}
+
+//
+// Live defuns.
+//
+
+impl Compiler {
     fn collect_live_defuns_for_context(
         &self,
         name: &str,
@@ -243,62 +255,13 @@ impl Compiler {
         //
         Ok(Some(result))
     }
+}
 
-    fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
-        let mut ctxt = Context::default();
-        let argcnt = defun.arguments().len();
-        //
-        // Make sure the function does not exist.
-        //
-        if self.defuns.contains_key(defun.name()) {
-            let name = defun.name().to_string().into_boxed_str();
-            return Err(Error::FunctionAlreadyDefined(name));
-        }
-        //
-        // Track the function arguments.
-        //
-        ctxt.track_arguments(defun.arguments());
-        //
-        // Track the function definition.
-        //
-        self.defuns.insert(defun.name().clone(), argcnt);
-        //
-        // Rotate the arguments and the return address.
-        //
-        if argcnt > 0 {
-            ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
-        }
-        //
-        // Compile the statements.
-        //
-        self.compile_statements(&mut ctxt, defun.statements())?;
-        //
-        // Generate the postamble if necessary.
-        //
-        if !defun.statements().is_tail_call() {
-            //
-            // Pop the arguments.
-            //
-            if argcnt > 0 {
-                ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
-                ctxt.stream.push_back(OpCode::Pop(argcnt).into());
-            }
-            //
-            // Inject the return call.
-            //
-            ctxt.stream.push_back(OpCode::Ret.into());
-            ctxt.stackn -= 1;
-        }
-        //
-        // Save the block.
-        //
-        self.blocks.push((defun.name().clone(), ctxt));
-        //
-        // Done.
-        //
-        Ok(())
-    }
+//
+// Module loading.
+//
 
+impl Compiler {
     fn load_modules(&mut self, stmts: &Statements) -> Result<(), Error> {
         stmts.iter().try_for_each(|v| {
             //
@@ -375,6 +338,67 @@ impl Compiler {
         // Process the statements.
         //
         self.load_and_compile(stmts)
+    }
+}
+
+//
+// Compilation.
+//
+
+impl Compiler {
+    fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
+        let mut ctxt = Context::default();
+        let argcnt = defun.arguments().len();
+        //
+        // Make sure the function does not exist.
+        //
+        if self.defuns.contains_key(defun.name()) {
+            let name = defun.name().to_string().into_boxed_str();
+            return Err(Error::FunctionAlreadyDefined(name));
+        }
+        //
+        // Track the function arguments.
+        //
+        ctxt.track_arguments(defun.arguments());
+        //
+        // Track the function definition.
+        //
+        self.defuns.insert(defun.name().clone(), argcnt);
+        //
+        // Rotate the arguments and the return address.
+        //
+        if argcnt > 0 {
+            ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+        }
+        //
+        // Compile the statements.
+        //
+        self.compile_statements(&mut ctxt, defun.statements())?;
+        //
+        // Generate the postamble if necessary.
+        //
+        if !defun.statements().is_tail_call() {
+            //
+            // Pop the arguments.
+            //
+            if argcnt > 0 {
+                ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                ctxt.stream.push_back(OpCode::Pop(argcnt).into());
+            }
+            //
+            // Inject the return call.
+            //
+            ctxt.stream.push_back(OpCode::Ret.into());
+            ctxt.stackn -= 1;
+        }
+        //
+        // Save the block.
+        //
+        self.blocks.push((defun.name().clone(), ctxt));
+        //
+        // Done.
+        //
+        Ok(())
     }
 
     fn compile_arguments(&mut self, ctxt: &mut Context, stmts: &Statements) -> Result<(), Error> {
@@ -801,11 +825,5 @@ impl Compiler {
         // Done.
         //
         Ok(())
-    }
-
-    fn label(&mut self, prefix: &str) -> Box<str> {
-        let label = format!("{prefix}_{:04}", self.lcount).into_boxed_str();
-        self.lcount += 1;
-        label
     }
 }

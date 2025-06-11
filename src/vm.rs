@@ -68,6 +68,12 @@ impl VirtualMachine {
                     let v = Value::from(Immediate::Number(a + b));
                     self.stack.push(v.into());
                 }
+                OpCode::Sub => {
+                    let a = self.stack.pop().immediate().number();
+                    let b = self.stack.pop().immediate().number();
+                    let v = Value::from(Immediate::Number(a - b));
+                    self.stack.push(v.into());
+                }
                 OpCode::Ge => {
                     let a = self.stack.pop().immediate().number();
                     let b = self.stack.pop().immediate().number();
@@ -87,12 +93,6 @@ impl VirtualMachine {
                     let a = self.stack.pop().immediate().number();
                     let b = self.stack.pop().immediate().number();
                     self.stack.push(Value::from(Immediate::from(a < b)).into());
-                }
-                OpCode::Sub => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
-                    let v = Value::from(Immediate::Number(a - b));
-                    self.stack.push(v.into());
                 }
                 //
                 // Logics.

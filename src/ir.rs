@@ -15,6 +15,8 @@ pub enum Operator {
     //
     #[strum(serialize = "+")]
     Add,
+    #[strum(serialize = "-")]
+    Sub,
     #[strum(serialize = ">=")]
     Ge,
     #[strum(serialize = ">")]
@@ -23,8 +25,6 @@ pub enum Operator {
     Le,
     #[strum(serialize = "<")]
     Lt,
-    #[strum(serialize = "-")]
-    Sub,
     //
     // Logic.
     //
