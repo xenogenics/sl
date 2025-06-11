@@ -45,7 +45,8 @@ fn main() -> Result<(), Error> {
     //
     // Compile the atoms.
     //
-    let compiler = Compiler::default();
+    let mut compiler = Compiler::default();
+    compiler.lift_operators()?;
     let state = compiler.compile(atoms)?;
     //
     // Write the serialize output.

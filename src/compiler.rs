@@ -827,3 +827,78 @@ impl Compiler {
         Ok(())
     }
 }
+
+//
+// Lifters.
+//
+
+impl Compiler {
+    pub fn lift_operators(&mut self) -> Result<(), Error> {
+        //
+        // Define the top-level statements for the operators.
+        //
+        let stmts = vec![
+            //
+            // Arithmetics.
+            //
+            Self::lift(Operator::Add, 2),
+            Self::lift(Operator::Sub, 2),
+            Self::lift(Operator::Ge, 2),
+            Self::lift(Operator::Gt, 2),
+            Self::lift(Operator::Le, 2),
+            Self::lift(Operator::Lt, 2),
+            //
+            // Logic.
+            //
+            Self::lift(Operator::And, 2),
+            Self::lift(Operator::Equ, 2),
+            Self::lift(Operator::Neq, 2),
+            Self::lift(Operator::Not, 1),
+            Self::lift(Operator::Or, 2),
+            //
+            // List.
+            //
+            Self::lift(Operator::Car, 1),
+            Self::lift(Operator::Cdr, 1),
+            Self::lift(Operator::Cons, 2),
+            //
+            // Predicates.
+            //
+            Self::lift(Operator::IsLst, 1),
+            Self::lift(Operator::IsNil, 1),
+        ];
+        //
+        // Compile the statements.
+        //
+        self.load_and_compile(stmts)
+    }
+
+    fn lift(op: Operator, argcnt: usize) -> TopLevelStatement {
+        //
+        // Build the argument list.
+        //
+        let args: Vec<_> = (0..argcnt)
+            .map(|v| format!("_{v}").into_boxed_str())
+            .collect();
+        //
+        // Build the application.
+        //
+        let apply = Statement::Apply(
+            Statement::Operator(op).into(),
+            Statements::new(args.clone().into_iter().map(Statement::Symbol).collect()),
+            Location::Any,
+        );
+        //
+        // Build the statements.
+        //
+        let stmts = Statements::new(vec![apply]);
+        //
+        // Build the function definition.
+        //
+        let defun = FunctionDefinition::new(op.to_string().into_boxed_str(), args, stmts);
+        //
+        // Done.
+        //
+        TopLevelStatement::FunctionDefinition(defun)
+    }
+}

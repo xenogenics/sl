@@ -8,7 +8,7 @@ use crate::{atom::Atom, error::Error};
 // Built-in operator.
 //
 
-#[derive(Debug, strum_macros::Display, EnumString, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, strum_macros::Display, EnumString, Eq, PartialEq)]
 pub enum Operator {
     //
     // Arithmetics.
@@ -538,7 +538,6 @@ impl TryFrom<Rc<Atom>> for Statement {
 pub struct Statements(Vec<Statement>);
 
 impl Statements {
-    #[cfg(test)]
     pub fn new(stmts: Vec<Statement>) -> Self {
         Self(stmts)
     }
@@ -641,7 +640,6 @@ impl TryFrom<Rc<Atom>> for TopLevelStatement {
 pub struct FunctionDefinition(Box<str>, Vec<Box<str>>, Statements);
 
 impl FunctionDefinition {
-    #[cfg(test)]
     pub fn new(name: Box<str>, args: Vec<Box<str>>, stmts: Statements) -> Self {
         Self(name, args, stmts)
     }

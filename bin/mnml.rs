@@ -47,7 +47,8 @@ fn main() -> Result<(), Error> {
     //
     // Compile the atoms.
     //
-    let compiler = Compiler::default();
+    let mut compiler = Compiler::default();
+    compiler.lift_operators()?;
     let (syms, ops) = compiler.compile(atoms)?;
     //
     // Build the virtual machine.

@@ -205,6 +205,7 @@ impl VirtualMachine {
                             heap::Value::Pair(..) => true,
                             _ => false,
                         },
+                        Value::Immediate(Immediate::Nil) => true,
                         _ => false,
                     };
                     self.stack.push(Value::Immediate(r.into()));

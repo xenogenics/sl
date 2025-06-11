@@ -31,14 +31,15 @@ List: Rc<Atom> = {
 }
 
 Items: Rc<Atom> = {
-	"'" <e:ListOrTerminal>           => Atom::cons(Atom::cons(Atom::symbol("quote"), e), Atom::nil()), 
-	    <e:ListOrTerminal>           => Atom::cons(e, Atom::nil()),
-	    <e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
+    <e:ListOrTerminal>           => Atom::cons(e, Atom::nil()),
+    <e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
 }
 
 ListOrTerminal: Rc<Atom> = {
-	<e:List> => e,
-	<e:Terminal> => e,
+	"'" <e:List>     => Atom::cons(Atom::symbol("quote"), e),
+	"'" <e:Terminal> => Atom::cons(Atom::symbol("quote"), e),
+	<e:List>         => e,
+	<e:Terminal>     => e,
 }
 
 Terminal: Rc<Atom> = {
