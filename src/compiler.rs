@@ -1,12 +1,12 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, VecDeque},
     rc::Rc,
 };
 
 use crate::{
     atom::Atom,
     error::Error,
-    ir::{FunctionDefinition, Operator, Statement, Statements, Value},
+    ir::{FunctionDefinition, Location, Operator, Statement, Statements, Value},
     opcodes::{Immediate, OpCode, OpCodes},
 };
 
@@ -81,7 +81,7 @@ type Stream = VecDeque<LabelOrOpCode>;
 #[derive(Default)]
 pub struct Compiler {
     blocks: Vec<(Box<str>, Context)>,
-    defuns: HashSet<Box<str>>,
+    defuns: HashMap<Box<str>, usize>,
     labels: HashMap<Box<str>, usize>,
     lcount: usize,
 }
@@ -123,12 +123,12 @@ impl Compiler {
             .into_iter()
             .map(|v| match v {
                 LabelOrOpCode::Branch(v) => {
-                    let address = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
-                    Ok(OpCode::Br(address))
+                    let delta = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
+                    Ok(OpCode::Br(delta as isize))
                 }
                 LabelOrOpCode::BranchIfNot(v) => {
-                    let address = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
-                    Ok(OpCode::Brn(address))
+                    let delta = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
+                    Ok(OpCode::Brn(delta as isize))
                 }
                 LabelOrOpCode::Funcall(v) => {
                     //
@@ -169,11 +169,11 @@ impl Compiler {
 
     fn compile_defun(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let mut ctxt = Context::default();
-        let depth = defun.arguments().len();
+        let argcnt = defun.arguments().len();
         //
         // Make sure the function does not exist.
         //
-        if self.defuns.contains(defun.name()) {
+        if self.defuns.contains_key(defun.name()) {
             let name = defun.name().to_string().into_boxed_str();
             return Err(Error::FunctionAlreadyDefined(name));
         }
@@ -184,34 +184,38 @@ impl Compiler {
         //
         // Track the function definition.
         //
-        self.defuns
-            .insert(defun.name().to_string().into_boxed_str());
+        self.defuns.insert(defun.name().clone(), argcnt);
         //
         // Rotate the arguments and the return address.
         //
-        if depth > 0 {
-            ctxt.stream.push_back(OpCode::Rot(depth + 1).into());
+        if argcnt > 0 {
+            ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
         }
         //
         // Compile the statements.
         //
         self.compile_statements(&mut ctxt, defun.statements())?;
         //
-        // Pop the arguments.
+        // Generate the postamble if necessary.
         //
-        if depth > 0 {
-            ctxt.stream.push_back(OpCode::Rot(depth + 1).into());
-            ctxt.stream.push_back(OpCode::Pop(depth).into());
+        if !defun.statements().is_tail_call() {
+            //
+            // Pop the arguments.
+            //
+            if argcnt > 0 {
+                ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                ctxt.stream.push_back(OpCode::Pop(argcnt).into());
+            }
+            //
+            // Inject the return call.
+            //
+            ctxt.stream.push_back(OpCode::Ret.into());
+            ctxt.stackn -= 1;
         }
-        //
-        // Inject the return call.
-        //
-        ctxt.stream.push_back(OpCode::Ret.into());
-        ctxt.stackn -= 1;
         //
         // Save the block.
         //
-        self.blocks.push((defun.name().into(), ctxt));
+        self.blocks.push((defun.name().clone(), ctxt));
         //
         // Done.
         //
@@ -299,7 +303,7 @@ impl Compiler {
         stmt: &Statement,
     ) -> Result<(), Error> {
         match stmt {
-            Statement::Apply(op, args) => {
+            Statement::Apply(op, args, Location::Any) => {
                 //
                 // Compile the arguments.
                 //
@@ -324,6 +328,41 @@ impl Compiler {
                 //
                 Ok(())
             }
+            Statement::Apply(op, args, Location::Tail) => {
+                //
+                // Get the symbol of the tail call.
+                //
+                let Statement::Value(Value::Symbol(symbol)) = op.as_ref() else {
+                    todo!();
+                };
+                //
+                // Compile the arguments.
+                //
+                self.compile_arguments(ctxt, args)?;
+                //
+                // Grab the argument count.
+                //
+                let argcnt = self.defuns.get(symbol).copied().unwrap();
+                //
+                // Pop the arguments.
+                //
+                if argcnt > 0 {
+                    ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                    ctxt.stream.push_back(OpCode::Pop(argcnt).into());
+                }
+                //
+                // Compute the offset of the branch.
+                //
+                let offset = ctxt.stream.len() - (argcnt > 0) as usize;
+                //
+                // Generate the branch.
+                //
+                ctxt.stream.push_back(OpCode::Br(-(offset as isize)).into());
+                //
+                // Done.
+                //
+                Ok(())
+            }
             Statement::Lambda(args, statements) => {
                 let mut next = Context::default();
                 //
@@ -337,13 +376,13 @@ impl Compiler {
                 //
                 // Remove the global symbols from the closure.
                 //
-                self.defuns.iter().for_each(|v| {
+                self.defuns.keys().for_each(|v| {
                     closure.remove(v);
                 });
                 //
                 // Compute the preamble depth.
                 //
-                let depth = args.len() + closure.len();
+                let argcnt = args.len() + closure.len();
                 //
                 // Track the function arguments.
                 //
@@ -355,17 +394,17 @@ impl Compiler {
                 //
                 // Generate the preamble and the postamble.
                 //
-                if depth > 0 {
+                if argcnt > 0 {
                     //
                     // Generate the preamble.
                     //
-                    next.stream.push_front(OpCode::Rot(depth + 1).into());
+                    next.stream.push_front(OpCode::Rot(argcnt + 1).into());
                     //
                     // Generate the postamble.
                     //
-                    if depth > 0 {
-                        next.stream.push_back(OpCode::Rot(depth + 1).into());
-                        next.stream.push_back(OpCode::Pop(depth).into());
+                    if argcnt > 0 {
+                        next.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                        next.stream.push_back(OpCode::Pop(argcnt).into());
                     }
                 }
                 //
@@ -468,12 +507,17 @@ impl Compiler {
                 let delta = (ctxt.stream.len() - start) + 1;
                 self.labels.insert(name, delta);
                 //
-                // Generate the branch past the else block.
+                // Build the label past the else block.
                 //
                 let name = self.label("END_ELSE");
                 let start = ctxt.stream.len();
-                let label = LabelOrOpCode::Branch(name.clone());
-                ctxt.stream.push_back(label);
+                //
+                // Generate the branch past the else block if necessary.
+                //
+                if !then.is_tail_call() {
+                    let label = LabelOrOpCode::Branch(name.clone());
+                    ctxt.stream.push_back(label);
+                }
                 //
                 // Compile ELSE.
                 //
@@ -492,7 +536,7 @@ impl Compiler {
                 Ok(())
             }
             Statement::Let(bindings, statements) => {
-                let depth = bindings.len();
+                let argcnt = bindings.len();
                 //
                 // Compile the bindings.
                 //
@@ -504,9 +548,9 @@ impl Compiler {
                 //
                 // Pop the bindings.
                 //
-                if depth > 0 {
-                    ctxt.stream.push_back(OpCode::Rot(depth + 1).into());
-                    ctxt.stream.push_back(OpCode::Pop(depth).into());
+                if argcnt > 0 {
+                    ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                    ctxt.stream.push_back(OpCode::Pop(argcnt).into());
                 }
                 //
                 // Clear the bindings from the locals.

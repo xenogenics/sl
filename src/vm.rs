@@ -173,7 +173,7 @@ impl VirtualMachine {
                 // Control flow.
                 //
                 OpCode::Br(v) => {
-                    pc = pc + v;
+                    pc = (pc as isize + v) as usize;
                     continue;
                 }
                 OpCode::Call => {
@@ -198,7 +198,7 @@ impl VirtualMachine {
 
                 OpCode::Brn(v) => {
                     if matches!(self.stack.pop(), Value::Immediate(Immediate::Nil)) {
-                        pc += v;
+                        pc = (pc as isize + v) as usize;
                         continue;
                     }
                 }

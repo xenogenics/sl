@@ -87,6 +87,16 @@ impl TryFrom<Rc<Atom>> for Value {
 }
 
 /*
+ * Application location.
+ */
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Location {
+    Any,
+    Tail,
+}
+
+/*
  * Statement.
  */
 
@@ -95,7 +105,7 @@ pub enum Statement {
     //
     // Function application.
     //
-    Apply(Box<Statement>, Statements),
+    Apply(Box<Statement>, Statements, Location),
     Lambda(Vec<Box<str>>, Statements),
     Operator(Operator),
     //
@@ -112,7 +122,7 @@ pub enum Statement {
 impl Statement {
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
-            Statement::Apply(sym, stmts) => {
+            Statement::Apply(sym, stmts, _) => {
                 let mut v = sym.closure();
                 v.extend(stmts.closure());
                 v
@@ -325,12 +335,12 @@ impl Statement {
                     Ok(v) => {
                         let stmt = Box::new(Statement::Operator(v));
                         let stmts: Statements = rem.clone().try_into()?;
-                        Ok(Self::Apply(stmt, stmts))
+                        Ok(Self::Apply(stmt, stmts, Location::Any))
                     }
                     Err(_) => {
                         let stmt = Box::new(Statement::Value(Value::Symbol(sym.clone())));
                         let stmts: Statements = rem.clone().try_into()?;
-                        Ok(Self::Apply(stmt, stmts))
+                        Ok(Self::Apply(stmt, stmts, Location::Any))
                     }
                 },
             },
@@ -340,14 +350,14 @@ impl Statement {
             _ => {
                 let car = Box::new(Statement::try_from(atom.clone())?);
                 let cdr: Statements = rem.clone().try_into()?;
-                Ok(Self::Apply(car, cdr))
+                Ok(Self::Apply(car, cdr, Location::Any))
             }
         }
     }
 
     pub fn statements(&self) -> Box<dyn std::iter::Iterator<Item = &Statement> + '_> {
         match self {
-            Statement::Apply(statement, statements) => {
+            Statement::Apply(statement, statements, _) => {
                 let iter = Some(statement.as_ref())
                     .into_iter()
                     .chain(statements.iter());
@@ -374,12 +384,52 @@ impl Statement {
             _ => Box::new(None.into_iter()),
         }
     }
+
+    fn identify_tail_calls(&mut self, name: &str) {
+        match self {
+            Statement::Apply(stmt, _, location) => {
+                if let Statement::Value(Value::Symbol(v)) = stmt.as_ref() {
+                    if name == v.as_ref() {
+                        *location = Location::Tail;
+                    }
+                }
+            }
+            Statement::IfThenElse(_, then, else_) => {
+                //
+                // Process THEN.
+                //
+                then.identify_tail_calls(name);
+                //
+                // Process ELSE.
+                //
+                if let Some(else_) = else_.as_mut() {
+                    else_.identify_tail_calls(name);
+                }
+            }
+            Statement::Let(_, stmts) => stmts.identify_tail_calls(name),
+            _ => (),
+        }
+    }
+
+    pub fn is_tail_call(&self) -> bool {
+        match self {
+            Statement::Apply(_, _, Location::Tail) => true,
+            Statement::IfThenElse(_, then, else_) => {
+                then.is_tail_call()
+                    && else_
+                        .as_deref()
+                        .map(Statement::is_tail_call)
+                        .unwrap_or_default()
+            }
+            _ => false,
+        }
+    }
 }
 
 impl Display for Statement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Statement::Apply(statement, statements) => {
+            Statement::Apply(statement, statements, _) => {
                 write!(f, "({statement}")?;
                 write!(f, "{statements}")?;
                 write!(f, ")")
@@ -456,6 +506,26 @@ impl Statements {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    fn identify_tail_calls(&mut self, name: &str) {
+        //
+        // Get the last statement.
+        //
+        let Some(stmt) = self.0.last_mut() else {
+            return;
+        };
+        //
+        // Identify tail calls on the last statement.
+        //
+        stmt.identify_tail_calls(name);
+    }
+
+    pub fn is_tail_call(&self) -> bool {
+        self.0
+            .last()
+            .map(Statement::is_tail_call)
+            .unwrap_or_default()
+    }
 }
 
 impl Display for Statements {
@@ -489,7 +559,7 @@ impl FunctionDefinition {
         Self(name, args, stmts)
     }
 
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &Box<str> {
         &self.0
     }
 
@@ -585,7 +655,11 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
         //
         // Build the statement list.
         //
-        let stmts: Statements = rem.clone().try_into()?;
+        let mut stmts: Statements = rem.clone().try_into()?;
+        //
+        // Identify tail calls.
+        //
+        stmts.identify_tail_calls(name.as_ref());
         //
         // Done.
         //

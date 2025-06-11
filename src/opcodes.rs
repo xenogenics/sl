@@ -64,8 +64,8 @@ pub enum OpCode {
     //
     // Control flow.
     //
-    Br(usize),
-    Brn(usize),
+    Br(isize),
+    Brn(isize),
     Call,
     Hlt,
     Ret,

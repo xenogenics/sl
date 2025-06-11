@@ -591,4 +591,100 @@ mod compiler {
             ]
         )
     }
+
+    #[test]
+    fn def_loop_with_tailcall_optimization() {
+        let parser = ListsParser::new();
+        let atoms = parser.parse("(def test() (test))").unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(result, vec![OpCode::Br(0)]);
+    }
+
+    #[test]
+    fn def_loop_with_may_statements_with_tailcall_optimization() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def test()
+                    (+ 1 1)
+                    (test))
+                "#,
+            )
+            .unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Add,
+                OpCode::Pop(1),
+                OpCode::Br(-4),
+            ]
+        );
+    }
+
+    #[test]
+    fn def_if_then_with_tailcall_optimization() {
+        let parser = ListsParser::new();
+        let atoms = parser.parse("(def test(a) (if a (test (cdr a))))").unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                OpCode::Rot(2),              // [ret0, a]
+                OpCode::Get(1),              // [ret0, a, a]
+                OpCode::Brn(7),              //
+                OpCode::Get(1),              // [ret0, a, a]
+                OpCode::Cdr,                 // [ret0, a, cdr(a)]
+                OpCode::Rot(2),              // [ret0, cdr(a), a]
+                OpCode::Pop(1),              // [ret0, cdr(a)]
+                OpCode::Br(-6),              //
+                OpCode::Psh(Immediate::Nil), // [ret0, a, nil]
+                OpCode::Rot(2),              // [ret0, nil, a]
+                OpCode::Pop(1),              // [ret0, nil]
+                OpCode::Ret                  // [nil]
+            ]
+        );
+    }
+
+    #[test]
+    fn def_if_then_else_with_tailcall_optimization() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def test(a)
+                    (if a
+                        (test (cdr a))
+                        (test (car a))
+                    ))
+                "#,
+            )
+            .unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                OpCode::Rot(2),  // [ret0, a]
+                OpCode::Get(1),  // [ret0, a, a]
+                OpCode::Brn(7),  //
+                OpCode::Get(1),  // [ret0, a, a]
+                OpCode::Cdr,     // [ret0, a, cdr(a)]
+                OpCode::Rot(2),  // [ret0, cdr(a), a]
+                OpCode::Pop(1),  // [ret0, cdr(a)]
+                OpCode::Br(-6),  //
+                OpCode::Get(1),  // [ret0, a, a]
+                OpCode::Car,     // [ret0, a, car(a)]
+                OpCode::Rot(2),  // [ret0, cdr(a), a]
+                OpCode::Pop(1),  // [ret0, cdr(a)]
+                OpCode::Br(-11), //
+            ]
+        );
+    }
 }
