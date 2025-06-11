@@ -95,6 +95,33 @@ impl VirtualMachine {
                     self.stack.push(v.into());
                 }
                 //
+                // Logics.
+                //
+                OpCode::And => {
+                    let a = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    let b = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate((!a && !b).into()));
+                }
+                OpCode::Equ => {
+                    let a = self.stack.pop();
+                    let b = self.stack.pop();
+                    self.stack.push(Value::Immediate((a == b).into()));
+                }
+                OpCode::Neq => {
+                    let a = self.stack.pop();
+                    let b = self.stack.pop();
+                    self.stack.push(Value::Immediate((a != b).into()));
+                }
+                OpCode::Not => {
+                    let a = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate(a.into()));
+                }
+                OpCode::Or => {
+                    let a = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    let b = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate((!a || !b).into()));
+                }
+                //
                 // List operations.
                 //
                 OpCode::Car => {
@@ -170,11 +197,34 @@ impl VirtualMachine {
                         .push(Value::Heap(Rc::new(heap::Value::Pair(a, b))));
                 }
                 //
+                // Predicates.
+                //
+                OpCode::IsLst => {
+                    let r = match self.stack.pop() {
+                        Value::Heap(value) => match value.as_ref() {
+                            heap::Value::Pair(..) => true,
+                            _ => false,
+                        },
+                        _ => false,
+                    };
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsNil => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                //
                 // Control flow.
                 //
                 OpCode::Br(v) => {
                     pc = (pc as isize + v) as usize;
                     continue;
+                }
+                OpCode::Brn(v) => {
+                    if matches!(self.stack.pop(), Value::Immediate(Immediate::Nil)) {
+                        pc = (pc as isize + v) as usize;
+                        continue;
+                    }
                 }
                 OpCode::Call => {
                     //
@@ -195,14 +245,6 @@ impl VirtualMachine {
                     pc = address;
                     continue;
                 }
-
-                OpCode::Brn(v) => {
-                    if matches!(self.stack.pop(), Value::Immediate(Immediate::Nil)) {
-                        pc = (pc as isize + v) as usize;
-                        continue;
-                    }
-                }
-                OpCode::Hlt => todo!(),
                 OpCode::Ret => {
                     pc = self.stack.unlink().link();
                     continue;
@@ -217,11 +259,6 @@ impl VirtualMachine {
                 OpCode::Psh(v) => self.stack.push(Value::from(v).into()),
                 OpCode::Rot(n) => self.stack.rotate(n),
                 OpCode::Swp => self.stack.swap(),
-                //
-                // Memory operations.
-                //
-                OpCode::Ld => todo!(),
-                OpCode::St => todo!(),
             }
             //
             // Increment the program counter.

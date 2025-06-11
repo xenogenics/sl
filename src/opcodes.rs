@@ -11,6 +11,7 @@ pub enum Immediate {
     Char(u8),
     Number(i64),
     Funcall(usize),
+    Symbol([u8; 15]),
 }
 
 impl Immediate {
@@ -56,18 +57,30 @@ pub enum OpCode {
     Lt,
     Sub,
     //
+    // Logic operations.
+    //
+    And,
+    Equ,
+    Neq,
+    Not,
+    Or,
+    //
     // List operations.
     //
     Car,
     Cdr,
     Cons,
     //
+    // Predicates.
+    //
+    IsLst,
+    IsNil,
+    //
     // Control flow.
     //
     Br(isize),
     Brn(isize),
     Call,
-    Hlt,
     Ret,
     //
     // Stack operations.
@@ -79,11 +92,6 @@ pub enum OpCode {
     Psh(Immediate),
     Rot(usize),
     Swp,
-    //
-    // Memory operations.
-    //
-    Ld,
-    St,
 }
 
 pub type OpCodes = Vec<OpCode>;

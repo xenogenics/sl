@@ -4,15 +4,15 @@ use strum_macros::EnumString;
 
 use crate::{atom::Atom, error::Error};
 
-/*
- * Built-in operator.
- */
+//
+// Built-in operator.
+//
 
 #[derive(Debug, strum_macros::Display, EnumString, Eq, PartialEq)]
 pub enum Operator {
-    /*
-     * Arithmetics.
-     */
+    //
+    // Arithmetics.
+    //
     #[strum(serialize = "+")]
     Add,
     #[strum(serialize = ">=")]
@@ -25,23 +25,44 @@ pub enum Operator {
     Lt,
     #[strum(serialize = "-")]
     Sub,
-    /*
-     * List operations.
-     */
+    //
+    // Logic.
+    //
+    #[strum(serialize = "and")]
+    And,
+    #[strum(serialize = "=")]
+    Equ,
+    #[strum(serialize = "<>")]
+    Neq,
+    #[strum(serialize = "not")]
+    Not,
+    #[strum(serialize = "or")]
+    Or,
+    //
+    // List operations.
+    //
     #[strum(serialize = "car")]
     Car,
     #[strum(serialize = "cdr")]
     Cdr,
     #[strum(serialize = "cons")]
     Cons,
+    //
+    // Predicates.
+    //
+    #[strum(serialize = "lst?")]
+    IsLst,
+    #[strum(serialize = "nil?")]
+    IsNil,
 }
 
-/*
- * Value.
- */
+//
+// Value.
+//
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub enum Value {
+    #[default]
     Nil,
     True,
     Char(u8),
@@ -49,6 +70,12 @@ pub enum Value {
     Pair(Box<Value>, Box<Value>),
     String(Box<str>),
     Symbol(Box<str>),
+}
+
+impl Value {
+    pub fn iter(&self) -> ValueIterator<'_> {
+        ValueIterator(self)
+    }
 }
 
 impl Display for Value {
@@ -86,9 +113,30 @@ impl TryFrom<Rc<Atom>> for Value {
     }
 }
 
-/*
- * Application location.
- */
+//
+// Value iterator.
+//
+
+pub struct ValueIterator<'a>(&'a Value);
+
+impl<'a> std::iter::Iterator for ValueIterator<'a> {
+    type Item = &'a Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            Value::Pair(car, cdr) => {
+                let result = car;
+                self.0 = cdr;
+                Some(result)
+            }
+            _ => None,
+        }
+    }
+}
+
+//
+// Application location.
+//
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Location {
@@ -96,9 +144,9 @@ pub enum Location {
     Tail,
 }
 
-/*
- * Statement.
- */
+//
+// Statement.
+//
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Statement {
@@ -114,8 +162,9 @@ pub enum Statement {
     IfThenElse(Box<Statement>, Box<Statement>, Option<Box<Statement>>),
     Let(Vec<(Box<str>, Statement)>, Statements),
     //
-    // Value.
+    // Symbol and value.
     //
+    Symbol(Box<str>),
     Value(Value),
 }
 
@@ -177,7 +226,7 @@ impl Statement {
                 //
                 v
             }
-            Statement::Value(Value::Symbol(sym)) => {
+            Statement::Symbol(sym) => {
                 let mut v = BTreeSet::new();
                 v.insert(sym.clone());
                 v
@@ -338,7 +387,7 @@ impl Statement {
                         Ok(Self::Apply(stmt, stmts, Location::Any))
                     }
                     Err(_) => {
-                        let stmt = Box::new(Statement::Value(Value::Symbol(sym.clone())));
+                        let stmt = Box::new(Statement::Symbol(sym.clone()));
                         let stmts: Statements = rem.clone().try_into()?;
                         Ok(Self::Apply(stmt, stmts, Location::Any))
                     }
@@ -388,7 +437,7 @@ impl Statement {
     fn identify_tail_calls(&mut self, name: &str) {
         match self {
             Statement::Apply(stmt, _, location) => {
-                if let Statement::Value(Value::Symbol(v)) = stmt.as_ref() {
+                if let Statement::Symbol(v) = stmt.as_ref() {
                     if name == v.as_ref() {
                         *location = Location::Tail;
                     }
@@ -462,6 +511,7 @@ impl Display for Statement {
                 write!(f, "{statements}")?;
                 write!(f, ")")
             }
+            Statement::Symbol(symbol) => write!(f, "{symbol}"),
             Statement::Value(value) => write!(f, "{value}"),
         }
     }
@@ -473,14 +523,15 @@ impl TryFrom<Rc<Atom>> for Statement {
     fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
         match atom.as_ref() {
             Atom::Pair(atom, rem) => Self::from_pair(atom.clone(), rem.clone()),
+            Atom::Symbol(sym) => Ok(Self::Symbol(sym.clone())),
             _ => Value::try_from(atom).map(Self::Value),
         }
     }
 }
 
-/*
- * Statements.
- */
+//
+// Statements.
+//
 
 #[derive(Debug, Eq, PartialEq)]
 #[repr(transparent)]
@@ -546,9 +597,45 @@ impl TryFrom<Rc<Atom>> for Statements {
     }
 }
 
-/*
- * Function definition.
- */
+//
+// Top-level statements.
+//
+
+pub enum TopLevelStatement {
+    FunctionDefinition(FunctionDefinition),
+    Load(Statements),
+}
+
+impl TryFrom<Rc<Atom>> for TopLevelStatement {
+    type Error = Error;
+
+    fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
+        //
+        // Split the function call.
+        //
+        let Atom::Pair(a, b) = atom.as_ref() else {
+            return Err(Error::ExpectedFunctionCall);
+        };
+        //
+        // Get the function symbol.
+        //
+        let Atom::Symbol(symbol) = a.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Process the top-level statement.
+        //
+        match symbol.as_ref() {
+            "def" => FunctionDefinition::try_from(atom).map(Self::FunctionDefinition),
+            "load" => b.clone().try_into().map(Self::Load),
+            _ => Err(Error::ExpectedTopLevelStatement),
+        }
+    }
+}
+
+//
+// Function definition.
+//
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FunctionDefinition(Box<str>, Vec<Box<str>>, Statements);
@@ -600,13 +687,13 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
         //
         // Split the function call.
         //
-        let Atom::Pair(a, b) = atom.as_ref() else {
+        let Atom::Pair(def, rem) = atom.as_ref() else {
             return Err(Error::ExpectedFunctionCall);
         };
         //
         // Get the function symbol.
         //
-        let Atom::Symbol(symbol) = a.as_ref() else {
+        let Atom::Symbol(symbol) = def.as_ref() else {
             return Err(Error::ExpectedSymbol);
         };
         //
@@ -618,7 +705,7 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
         //
         // Extract the function name.
         //
-        let Atom::Pair(name, rem) = b.as_ref() else {
+        let Atom::Pair(name, rem) = rem.as_ref() else {
             return Err(Error::ExpectedPair);
         };
         //
@@ -652,6 +739,19 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
             //
             Ok(acc)
         })?;
+        //
+        // Check if there is a comment.
+        //
+        let Atom::Pair(maybe_comment, statements) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Skip the comment if any.
+        //
+        let rem = match maybe_comment.as_ref() {
+            Atom::String(_) => statements,
+            _ => rem,
+        };
         //
         // Build the statement list.
         //

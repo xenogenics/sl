@@ -1,12 +1,14 @@
 use std::{
-    collections::{BTreeSet, HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    io::Read,
     rc::Rc,
 };
 
 use crate::{
     atom::Atom,
     error::Error,
-    ir::{FunctionDefinition, Location, Operator, Statement, Statements, Value},
+    grammar::ListsParser,
+    ir::{FunctionDefinition, Location, Operator, Statement, Statements, TopLevelStatement, Value},
     opcodes::{Immediate, OpCode, OpCodes},
 };
 
@@ -94,28 +96,38 @@ impl Compiler {
         //
         // Rewrite the atoms using our intermediate representation.
         //
-        let defuns: Vec<_> = atoms
+        let stmts: Vec<_> = atoms
             .into_iter()
-            .map(FunctionDefinition::try_from)
+            .map(TopLevelStatement::try_from)
             .collect::<Result<_, _>>()?;
         //
-        // Compile the function definitions.
+        // Recursively load files and compile function definitions.
         //
-        defuns
+        self.load_and_compile(stmts)?;
+        //
+        // Collect the live defuns.
+        //
+        let live_defuns = self.collect_live_defuns()?;
+        //
+        // Serialize the live streams.
+        //
+        let (index, stream) = self
+            .blocks
             .into_iter()
-            .map(|v| self.compile_defun(v))
-            .collect::<Result<(), _>>()?;
-        //
-        // Serialize the streams.
-        //
-        let (index, stream) = self.blocks.into_iter().fold(
-            (Vec::new(), Vec::new()),
-            |(mut offsets, mut opcodes), (name, ctxt)| {
-                offsets.push((name, opcodes.len()));
-                opcodes.extend(ctxt.stream);
-                (offsets, opcodes)
-            },
-        );
+            .filter(|(k, _)| {
+                live_defuns
+                    .as_ref()
+                    .map(|v| v.contains(k.as_ref()))
+                    .unwrap_or(true)
+            })
+            .fold(
+                (Vec::new(), Vec::new()),
+                |(mut offsets, mut opcodes), (name, ctxt)| {
+                    offsets.push((name, opcodes.len()));
+                    opcodes.extend(ctxt.stream);
+                    (offsets, opcodes)
+                },
+            );
         //
         // Convert the stream to opcodes.
         //
@@ -167,7 +179,72 @@ impl Compiler {
         Ok((index, opcodes))
     }
 
-    fn compile_defun(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
+    fn load_and_compile(&mut self, stmts: Vec<TopLevelStatement>) -> Result<(), Error> {
+        stmts.iter().try_for_each(|v| match v {
+            TopLevelStatement::FunctionDefinition(v) => self.compile_defun(v),
+            TopLevelStatement::Load(v) => self.load_modules(v),
+        })
+    }
+
+    fn collect_live_defuns_for_context(
+        &self,
+        name: &str,
+        ctxt: &Context,
+        index: &mut HashSet<String>,
+    ) -> Result<(), Error> {
+        //
+        // Track the funcall.
+        //
+        index.insert(name.to_owned());
+        //
+        // Collect the funcalls.
+        //
+        let funcalls: HashSet<_> = ctxt
+            .stream
+            .iter()
+            .filter_map(|v| match v {
+                LabelOrOpCode::Funcall(v) => Some(v.to_owned()),
+                LabelOrOpCode::Get(v, _) => Some(v.to_owned()),
+                _ => None,
+            })
+            .filter(|v| !index.contains(v.as_ref()))
+            .collect();
+        //
+        // Process the funcalls.
+        //
+        funcalls.into_iter().try_for_each(|v| {
+            //
+            // Grab the block.
+            //
+            let Some((_, ctxt)) = self.blocks.iter().find(|(k, _)| k == &v) else {
+                return Err(Error::UnresolvedSymbol(v));
+            };
+            //
+            // Process the block.
+            //
+            self.collect_live_defuns_for_context(v.as_ref(), ctxt, index)
+        })
+    }
+
+    fn collect_live_defuns(&self) -> Result<Option<HashSet<String>>, Error> {
+        let mut result = HashSet::new();
+        //
+        // Grab the main block.
+        //
+        let Some((name, ctxt)) = self.blocks.iter().find(|(k, _)| k.as_ref() == "main") else {
+            return Ok(None);
+        };
+        //
+        // Collect the funcalls.
+        //
+        self.collect_live_defuns_for_context(name.as_ref(), ctxt, &mut result)?;
+        //
+        // Done.
+        //
+        Ok(Some(result))
+    }
+
+    fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
         let mut ctxt = Context::default();
         let argcnt = defun.arguments().len();
         //
@@ -220,6 +297,84 @@ impl Compiler {
         // Done.
         //
         Ok(())
+    }
+
+    fn load_modules(&mut self, stmts: &Statements) -> Result<(), Error> {
+        stmts.iter().try_for_each(|v| {
+            //
+            // Make sure the statement is a value.
+            //
+            let Statement::Value(v) = v else {
+                return Err(Error::ExpectedValue);
+            };
+            //
+            // Check the value.
+            //
+            match v {
+                Value::Pair(car, cdr) => {
+                    //
+                    // Get the name of the module.
+                    //
+                    let Value::Symbol(name) = car.as_ref() else {
+                        return Err(Error::ExpectedSymbol);
+                    };
+                    //
+                    // Collect the names of the items.
+                    //
+                    let items: Vec<_> = cdr
+                        .iter()
+                        .map(|v| match v {
+                            Value::Symbol(v) => Ok(v.as_ref()),
+                            _ => Err(Error::ExpectedSymbol),
+                        })
+                        .collect::<Result<_, _>>()?;
+                    self.load_module(name, Some(&items))
+                }
+                Value::Symbol(v) => self.load_module(v, None),
+                _ => Err(Error::ExpectedPairOrSymbol),
+            }
+        })
+    }
+
+    fn load_module(&mut self, name: &str, _items: Option<&[&str]>) -> Result<(), Error> {
+        //
+        // Compute the source path.
+        //
+        let root = std::env::var("MNML_LIBRARY_PATH")?;
+        let path = format!("{root}/{name}.l");
+        //
+        // Open the source file.
+        //
+        let mut source = String::new();
+        let mut file = std::fs::File::open(path)?;
+        file.read_to_string(&mut source)?;
+        //
+        // Parse the source file.
+        //
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(&source)
+            .map_err(|v| Error::Parse(v.to_string()))?;
+        //
+        // Rewrite the atoms using our intermediate representation.
+        //
+        let mut stmts: Vec<_> = atoms
+            .into_iter()
+            .map(TopLevelStatement::try_from)
+            .collect::<Result<_, _>>()?;
+        //
+        // Filter function declarations.
+        //
+        if let Some(items) = _items {
+            stmts.retain(|v| match v {
+                TopLevelStatement::FunctionDefinition(v) => items.contains(&v.name().as_ref()),
+                TopLevelStatement::Load(_) => true,
+            });
+        }
+        //
+        // Process the statements.
+        //
+        self.load_and_compile(stmts)
     }
 
     fn compile_arguments(&mut self, ctxt: &mut Context, stmts: &Statements) -> Result<(), Error> {
@@ -332,7 +487,7 @@ impl Compiler {
                 //
                 // Get the symbol of the tail call.
                 //
-                let Statement::Value(Value::Symbol(symbol)) = op.as_ref() else {
+                let Statement::Symbol(symbol) = op.as_ref() else {
                     todo!();
                 };
                 //
@@ -457,15 +612,34 @@ impl Compiler {
                 // Get the opcode for the operator.
                 //
                 let opcode = match v {
+                    //
+                    // Arithmetics.
+                    //
                     Operator::Add => OpCode::Add.into(),
                     Operator::Ge => OpCode::Ge.into(),
                     Operator::Gt => OpCode::Gt.into(),
                     Operator::Le => OpCode::Le.into(),
                     Operator::Lt => OpCode::Lt.into(),
                     Operator::Sub => OpCode::Sub.into(),
+                    //
+                    // Logic.
+                    //
+                    Operator::And => OpCode::And.into(),
+                    Operator::Equ => OpCode::Equ.into(),
+                    Operator::Neq => OpCode::Neq.into(),
+                    Operator::Not => OpCode::Not.into(),
+                    Operator::Or => OpCode::Or.into(),
+                    //
+                    // List.
+                    //
                     Operator::Car => OpCode::Car.into(),
                     Operator::Cdr => OpCode::Cdr.into(),
                     Operator::Cons => OpCode::Cons.into(),
+                    //
+                    // Predicates.
+                    //
+                    Operator::IsLst => OpCode::IsLst.into(),
+                    Operator::IsNil => OpCode::IsNil.into(),
                 };
                 //
                 // Push the opcode.
@@ -561,8 +735,31 @@ impl Compiler {
                 //
                 Ok(())
             }
+            Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
             Statement::Value(value) => self.compile_value(ctxt, value),
         }
+    }
+
+    fn compile_symbol(&mut self, ctxt: &mut Context, symbol: &Box<str>) -> Result<(), Error> {
+        //
+        // Get the opcode.
+        //
+        let opcode = match ctxt.locals.get(symbol).and_then(|v| v.last()) {
+            Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
+            None => LabelOrOpCode::Get(symbol.clone(), ctxt.stackn),
+        };
+        //
+        // Push the opcode.
+        //
+        ctxt.stream.push_back(opcode);
+        //
+        // Update the stack tracker.
+        //
+        ctxt.stackn += 1;
+        //
+        // Done.
+        //
+        Ok(())
     }
 
     fn compile_value(&mut self, ctxt: &mut Context, value: &Value) -> Result<(), Error> {
@@ -570,15 +767,22 @@ impl Compiler {
         // Get the opcode.
         //
         let opcode = match value {
+            //
+            // Idempotent values.
+            //
             Value::Nil => OpCode::Psh(Immediate::Nil).into(),
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
             Value::String(_) => todo!(),
-            Value::Symbol(symbol) => match ctxt.locals.get(symbol).and_then(|v| v.last()) {
-                Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
-                None => LabelOrOpCode::Get(symbol.clone(), ctxt.stackn),
-            },
+            //
+            // Only generated as a result of (quote).
+            //
+            Value::Symbol(v) => {
+                let mut symbol = [0_u8; 15];
+                symbol[..v.len()].copy_from_slice(v.as_bytes());
+                OpCode::Psh(Immediate::Symbol(symbol)).into()
+            }
             Value::Pair(car, cdr) => {
                 self.compile_value(ctxt, cdr)?;
                 self.compile_value(ctxt, car)?;

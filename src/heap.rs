@@ -6,7 +6,7 @@ use crate::{opcodes::Immediate, stack};
 // Value.
 //
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
     Closure(Rc<[stack::Value]>),
     Immediate(Immediate),

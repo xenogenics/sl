@@ -6,7 +6,7 @@ use crate::{heap, opcodes::Immediate};
 // Value.
 //
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
     Closure(Rc<[Value]>),
     Heap(Rc<heap::Value>),

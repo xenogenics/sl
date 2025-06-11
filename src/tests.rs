@@ -421,7 +421,12 @@ mod compiler {
     fn def_with_main() {
         let parser = ListsParser::new();
         let atoms = parser
-            .parse("(def ADD (A B C) (+ A B) (- A C))(def main () (ADD 1 2 3))")
+            .parse(
+                r#"
+                (def ADD (A B C) (+ A B) (- A C))
+                (def main () (ADD 1 2 3))
+                "#,
+            )
             .unwrap();
         let compiler = Compiler::default();
         let (_, result) = compiler.compile(atoms).unwrap();
