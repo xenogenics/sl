@@ -304,7 +304,7 @@ impl Compiler {
         // Compute the source path.
         //
         let root = std::env::var("MNML_LIBRARY_PATH")?;
-        let path = format!("{root}/{name}.l");
+        let path = format!("{root}/{name}.sl");
         //
         // Open the source file.
         //
