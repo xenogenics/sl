@@ -1,5 +1,5 @@
 use clap::{arg, Parser};
-use mnml::{opcodes::OpCode, vm::VirtualMachine};
+use sl::{opcodes::OpCode, vm::VirtualMachine};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -15,7 +15,7 @@ struct Arguments {
 #[derive(Debug, Error)]
 enum Error {
     #[error(transparent)]
-    Mnml(#[from] mnml::error::Error),
+    Mnml(#[from] sl::error::Error),
     #[error(transparent)]
     Decode(#[from] bincode::error::DecodeError),
     #[error(transparent)]

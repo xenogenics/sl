@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use clap::{arg, Parser};
-use mnml::{compiler::Compiler, grammar::ListsParser};
+use sl::{compiler::Compiler, grammar::ListsParser};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -15,7 +15,7 @@ struct Arguments {
 #[derive(Debug, Error)]
 enum Error {
     #[error(transparent)]
-    Compile(#[from] mnml::error::Error),
+    Compile(#[from] sl::error::Error),
     #[error(transparent)]
     Encode(#[from] bincode::error::EncodeError),
     #[error(transparent)]

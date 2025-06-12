@@ -375,21 +375,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
-name = "mnml"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "clap",
- "env_logger",
- "lalrpop",
- "lalrpop-util",
- "map-macro",
- "strum",
- "strum_macros",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -568,6 +553,21 @@ name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
+
+[[package]]
+name = "sl"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clap",
+ "env_logger",
+ "lalrpop",
+ "lalrpop-util",
+ "map-macro",
+ "strum",
+ "strum_macros",
+ "thiserror 2.0.12",
+]
 
 [[package]]
 name = "smallvec"

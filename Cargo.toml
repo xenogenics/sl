@@ -1,19 +1,19 @@
 [package]
-name = "mnml"
+name = "sl"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "mnml"
-path = "bin/mnml.rs"
+name = "sl"
+path = "bin/sl.rs"
 
 [[bin]]
-name = "mnmlc"
-path = "bin/mnmlc.rs"
+name = "slc"
+path = "bin/slc.rs"
 
 [[bin]]
-name = "mnmlvm"
-path = "bin/mnmlvm.rs"
+name = "slvm"
+path = "bin/slvm.rs"
 
 [build-dependencies]
 lalrpop = "0.20"
