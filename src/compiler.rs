@@ -312,7 +312,7 @@ impl Compiler {
         // Compute the source path.
         //
         let root = std::env::var("SLISP_LIBRARY_PATH")?;
-        let path = format!("{root}/{name}.sl");
+        let path = format!("{root}/{name}.l");
         //
         // Open the source file.
         //
