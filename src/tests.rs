@@ -453,8 +453,8 @@ mod compiler {
                 OpCode::Psh(Immediate::Number(3)),
                 OpCode::Psh(Immediate::Number(2)),
                 OpCode::Psh(Immediate::Number(1)),
-                OpCode::Psh(Immediate::Funcall(0)),
-                OpCode::Call,
+                OpCode::Psh(Immediate::Funcall(0, 3)),
+                OpCode::Call(3),
                 OpCode::Ret,
             ]
         );
@@ -471,26 +471,26 @@ mod compiler {
         assert_eq!(
             result,
             vec![
-                OpCode::Rot(2),                     // [ret0, N]
-                OpCode::Psh(Immediate::Number(1)),  // [ret0, N, 1]
-                OpCode::Get(2),                     // [ret0, N, 1, N]
-                OpCode::Le,                         // [ret0, N, T/nil]
-                OpCode::Brn(3),                     // [ret0, N]
-                OpCode::Get(1),                     // [ret0, N, N]
-                OpCode::Br(12),                     //
-                OpCode::Psh(Immediate::Number(2)),  // [ret0, N, 2]
-                OpCode::Get(2),                     // [ret0, N, 1, N]
-                OpCode::Sub,                        // [ret0, N, N-2]
-                OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, N-2, fun0]
-                OpCode::Call,                       // [ret0, N, N-2, ret1]
-                OpCode::Psh(Immediate::Number(1)),  // [ret0, N, R0, 1]
-                OpCode::Get(3),                     // [ret0, N, R0, 1, N]
-                OpCode::Sub,                        // [ret0, N, R0, N-1]
-                OpCode::Psh(Immediate::Funcall(0)), // [ret0, N, R0, N-1, fun0]
-                OpCode::Call,                       // [ret0, N, N-1, ret1]
-                OpCode::Add,                        // [ret0, N, R0+R1]
-                OpCode::Rot(2),                     // [ret0, R0+R1, N]
-                OpCode::Pop(1),                     // [ret0, R0+R1]
+                OpCode::Rot(2),                        // [ret0, N]
+                OpCode::Psh(Immediate::Number(1)),     // [ret0, N, 1]
+                OpCode::Get(2),                        // [ret0, N, 1, N]
+                OpCode::Le,                            // [ret0, N, T/nil]
+                OpCode::Brn(3),                        // [ret0, N]
+                OpCode::Get(1),                        // [ret0, N, N]
+                OpCode::Br(12),                        //
+                OpCode::Psh(Immediate::Number(2)),     // [ret0, N, 2]
+                OpCode::Get(2),                        // [ret0, N, 1, N]
+                OpCode::Sub,                           // [ret0, N, N-2]
+                OpCode::Psh(Immediate::Funcall(0, 1)), // [ret0, N, N-2, fun0]
+                OpCode::Call(1),                       // [ret0, N, N-2, ret1]
+                OpCode::Psh(Immediate::Number(1)),     // [ret0, N, R0, 1]
+                OpCode::Get(3),                        // [ret0, N, R0, 1, N]
+                OpCode::Sub,                           // [ret0, N, R0, N-1]
+                OpCode::Psh(Immediate::Funcall(0, 1)), // [ret0, N, R0, N-1, fun0]
+                OpCode::Call(1),                       // [ret0, N, N-1, ret1]
+                OpCode::Add,                           // [ret0, N, R0+R1]
+                OpCode::Rot(2),                        // [ret0, R0+R1, N]
+                OpCode::Pop(1),                        // [ret0, R0+R1]
                 OpCode::Ret
             ]
         );
@@ -520,19 +520,19 @@ mod compiler {
                 //
                 // Test.
                 //
-                OpCode::Rot(2),                     // [ret0, a]
-                OpCode::Psh(Immediate::Funcall(0)), // [ret0, a, fun0]
-                OpCode::Pak(1),                     // [ret0, a, pak0]
-                OpCode::Psh(Immediate::Number(2)),  // [ret0, a, pak0, 2]
-                OpCode::Psh(Immediate::Number(1)),  // [ret0, a, pak0, 2, 1]
-                OpCode::Get(3),                     // [ret0, a, pak0, 2, 1, pak0]
-                OpCode::Call,                       // [ret0, a, pak0, 2, 1, ret1]
-                OpCode::Get(3),                     // [ret0, a, pak0, 3, a]
-                OpCode::Sub,                        // [ret0, a, pak0, a-3]
-                OpCode::Rot(2),                     // [ret0, a, a-3, pak0]
-                OpCode::Pop(1),                     // [ret0, a, a-3]
-                OpCode::Rot(2),                     // [ret0, a-3, a]
-                OpCode::Pop(1),                     // [ret0, a-3]
+                OpCode::Rot(2),                        // [ret0, a]
+                OpCode::Psh(Immediate::Funcall(0, 2)), // [ret0, a, fun0]
+                OpCode::Pak(1),                        // [ret0, a, pak0]
+                OpCode::Psh(Immediate::Number(2)),     // [ret0, a, pak0, 2]
+                OpCode::Psh(Immediate::Number(1)),     // [ret0, a, pak0, 2, 1]
+                OpCode::Get(3),                        // [ret0, a, pak0, 2, 1, pak0]
+                OpCode::Call(2),                       // [ret0, a, pak0, 2, 1, ret1]
+                OpCode::Get(3),                        // [ret0, a, pak0, 3, a]
+                OpCode::Sub,                           // [ret0, a, pak0, a-3]
+                OpCode::Rot(2),                        // [ret0, a, a-3, pak0]
+                OpCode::Pop(1),                        // [ret0, a, a-3]
+                OpCode::Rot(2),                        // [ret0, a-3, a]
+                OpCode::Pop(1),                        // [ret0, a-3]
                 OpCode::Ret
             ]
         )
@@ -569,30 +569,30 @@ mod compiler {
                 //
                 // (\ (b) ((\ () (+ a b)))
                 //
-                OpCode::Rot(3),                     // [ret0, b, a]
-                OpCode::Get(1),                     // [ret0, b, a, a]
-                OpCode::Get(3),                     // [ret0, b, a, a, b]
-                OpCode::Psh(Immediate::Funcall(0)), // [ret0, b, a, a, b, fun0]
-                OpCode::Pak(3),                     // [ret0, b, a, pak0]
-                OpCode::Call,                       // [ret0, b, a, a+b]
-                OpCode::Rot(3),                     // [ret0, a+b, b, a]
-                OpCode::Pop(2),                     // [ret0, a+b]
-                OpCode::Ret,                        // [a+b]
+                OpCode::Rot(3),                        // [ret0, b, a]
+                OpCode::Get(1),                        // [ret0, b, a, a]
+                OpCode::Get(3),                        // [ret0, b, a, a, b]
+                OpCode::Psh(Immediate::Funcall(0, 0)), // [ret0, b, a, a, b, fun0]
+                OpCode::Pak(3),                        // [ret0, b, a, pak0]
+                OpCode::Call(0),                       // [ret0, b, a, a+b]
+                OpCode::Rot(3),                        // [ret0, a+b, b, a]
+                OpCode::Pop(2),                        // [ret0, a+b]
+                OpCode::Ret,                           // [a+b]
                 //
                 // (def test ..)
                 //
-                OpCode::Rot(2),                     // [ret0, a]
-                OpCode::Get(1),                     // [ret0, a, a]
-                OpCode::Psh(Immediate::Funcall(7)), // [ret0, a, a, fun7]
-                OpCode::Pak(2),                     // [ret0, a, pak0]
-                OpCode::Psh(Immediate::Number(1)),  // [ret0, a, pak0, 1]
-                OpCode::Get(2),                     // [ret0, a, pak0, 1, pak0]
-                OpCode::Call,                       // [ret0, a, pak0, a+1]
-                OpCode::Rot(2),                     // [ret0, a, a+1, pak0]
-                OpCode::Pop(1),                     // [ret0, a, a+1]
-                OpCode::Rot(2),                     // [ret0, a+1, a]
-                OpCode::Pop(1),                     // [ret0, a+1]
-                OpCode::Ret                         // [a+1]
+                OpCode::Rot(2),                        // [ret0, a]
+                OpCode::Get(1),                        // [ret0, a, a]
+                OpCode::Psh(Immediate::Funcall(7, 1)), // [ret0, a, a, fun7]
+                OpCode::Pak(2),                        // [ret0, a, pak0]
+                OpCode::Psh(Immediate::Number(1)),     // [ret0, a, pak0, 1]
+                OpCode::Get(2),                        // [ret0, a, pak0, 1, pak0]
+                OpCode::Call(1),                       // [ret0, a, pak0, a+1]
+                OpCode::Rot(2),                        // [ret0, a, a+1, pak0]
+                OpCode::Pop(1),                        // [ret0, a, a+1]
+                OpCode::Rot(2),                        // [ret0, a+1, a]
+                OpCode::Pop(1),                        // [ret0, a+1]
+                OpCode::Ret                            // [a+1]
             ]
         )
     }

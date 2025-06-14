@@ -35,7 +35,7 @@ fn main() -> Result<(), Error> {
     // Decode the bytecode file.
     //
     let conf = bincode::config::standard();
-    let (syms, ops): (Vec<(Box<str>, usize)>, Vec<OpCode>) =
+    let (syms, ops): (Vec<(Box<str>, usize, usize)>, Vec<OpCode>) =
         bincode::decode_from_std_read(&mut file, conf)?;
     //
     // Build the virtual machine.

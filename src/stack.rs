@@ -3,19 +3,35 @@ use std::rc::Rc;
 use crate::{heap, opcodes::Immediate};
 
 //
+// Closure.
+//
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Closure {
+    args: usize,
+    vals: Rc<[Value]>,
+}
+
+impl Closure {
+    fn new(args: usize, vals: Rc<[Value]>) -> Self {
+        Self { args, vals }
+    }
+}
+
+//
 // Value.
 //
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
-    Closure(Rc<[Value]>),
+    Closure(Closure),
     Heap(Rc<heap::Value>),
     Immediate(Immediate),
     Link(usize),
 }
 
 impl Value {
-    pub fn immediate(&self) -> Immediate {
+    pub fn as_immediate(&self) -> Immediate {
         match self {
             Value::Immediate(v) => *v,
             _ => panic!("Expected an immediate value"),
@@ -98,14 +114,16 @@ impl Stack {
         }
     }
 
-    pub fn pack(&mut self, n: usize) {
-        let v: Rc<[Value]> = self.0[self.0.len() - n..].into();
-        self.drop(n);
-        self.push(Value::Closure(v))
+    pub fn pack(&mut self, args: usize, total: usize) {
+        let v: Rc<[Value]> = self.0[self.0.len() - total..].into();
+        self.drop(total);
+        self.push(Value::Closure(Closure::new(args, v)))
     }
 
-    pub fn unpack(&mut self, closure: Rc<[Value]>) {
-        self.0.extend_from_slice(closure.as_ref());
+    pub fn unpack(&mut self, closure: Closure) -> (usize, usize) {
+        let result = (closure.args, closure.vals.len());
+        self.0.extend_from_slice(closure.vals.as_ref());
+        result
     }
 
     pub fn unlink(&mut self) -> Value {

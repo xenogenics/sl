@@ -20,13 +20,17 @@ impl VirtualMachine {
         }
     }
 
-    pub fn run(&mut self, syms: Vec<(Box<str>, usize)>, ops: Vec<OpCode>) -> Result<(), Error> {
+    pub fn run(
+        &mut self,
+        syms: Vec<(Box<str>, usize, usize)>,
+        ops: Vec<OpCode>,
+    ) -> Result<(), Error> {
         //
         // Look-up the main function.
         //
         let main_fn = syms
             .iter()
-            .find_map(|(k, v)| (k.as_ref() == "main").then_some(v))
+            .find_map(|(k, v, _)| (k.as_ref() == "main").then_some(v))
             .copied();
         //
         // Make sure it exists.
@@ -63,35 +67,35 @@ impl VirtualMachine {
                 // Arithmetics.
                 //
                 OpCode::Add => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     let v = Value::from(Immediate::Number(a + b));
                     self.stack.push(v.into());
                 }
                 OpCode::Sub => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     let v = Value::from(Immediate::Number(a - b));
                     self.stack.push(v.into());
                 }
                 OpCode::Ge => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     self.stack.push(Value::from(Immediate::from(a >= b)).into());
                 }
                 OpCode::Gt => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     self.stack.push(Value::from(Immediate::from(a > b)).into());
                 }
                 OpCode::Le => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     self.stack.push(Value::from(Immediate::from(a <= b)).into());
                 }
                 OpCode::Lt => {
-                    let a = self.stack.pop().immediate().number();
-                    let b = self.stack.pop().immediate().number();
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
                     self.stack.push(Value::from(Immediate::from(a < b)).into());
                 }
                 //
@@ -227,25 +231,53 @@ impl VirtualMachine {
                         continue;
                     }
                 }
-                OpCode::Call => {
-                    //
-                    // Decode the call address.
-                    //
-                    let address = match self.stack.pop() {
-                        Value::Closure(v) => {
-                            self.stack.unpack(v);
-                            self.stack.pop().immediate().funcall()
+                OpCode::Call(argcnt) => match self.stack.pop() {
+                    Value::Closure(v) => {
+                        //
+                        // Unpack the closure.
+                        //
+                        let (argpak, paklen) = self.stack.unpack(v);
+                        //
+                        // Decode the funcall.
+                        //
+                        let (addr, argexp) = self.stack.pop().as_immediate().as_funcall();
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt + argpak < argexp as usize {
+                            let imm = Immediate::Funcall(addr, argexp);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt + argpak, argcnt + paklen);
                         }
-                        Value::Immediate(Immediate::Funcall(v)) => v,
-                        _ => panic!("Expected a function address or closure"),
-                    };
-                    //
-                    // Push the return link and jump.
-                    //
-                    self.stack.push(Value::Link(pc + 1).into());
-                    pc = address;
-                    continue;
-                }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            self.stack.push(Value::Link(pc + 1).into());
+                            pc = addr as usize;
+                            continue;
+                        }
+                    }
+                    Value::Immediate(Immediate::Funcall(addr, argexp)) => {
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt < argexp as usize {
+                            let imm = Immediate::Funcall(addr, argexp);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt, argcnt + 1);
+                        }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            self.stack.push(Value::Link(pc + 1).into());
+                            pc = addr as usize;
+                            continue;
+                        }
+                    }
+                    _ => panic!("Expected a function address or closure"),
+                },
                 OpCode::Ret => {
                     pc = self.stack.unlink().link();
                     continue;
@@ -255,7 +287,7 @@ impl VirtualMachine {
                 //
                 OpCode::Dup(v) => self.stack.dup(v),
                 OpCode::Get(v) => self.stack.get(v),
-                OpCode::Pak(v) => self.stack.pack(v),
+                OpCode::Pak(v) => self.stack.pack(0, v),
                 OpCode::Pop(v) => self.stack.drop(v),
                 OpCode::Psh(v) => self.stack.push(Value::from(v).into()),
                 OpCode::Rot(n) => self.stack.rotate(n),

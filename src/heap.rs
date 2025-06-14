@@ -8,7 +8,7 @@ use crate::{opcodes::Immediate, stack};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Value {
-    Closure(Rc<[stack::Value]>),
+    Closure(stack::Closure),
     Immediate(Immediate),
     Pair(Rc<Value>, Rc<Value>),
 }

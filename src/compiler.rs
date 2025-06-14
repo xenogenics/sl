@@ -16,14 +16,24 @@ use crate::{
 // Context.
 //
 
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Context {
+    argcnt: usize,
     locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
     stream: Stream,
 }
 
 impl Context {
+    fn new(argcnt: usize) -> Self {
+        Self {
+            argcnt,
+            locals: HashMap::default(),
+            stackn: 0,
+            stream: Stream::default(),
+        }
+    }
+
     fn track_arguments(&mut self, args: &[Box<str>]) {
         self.track_arguments_and_closure(args, &BTreeSet::new());
     }
@@ -60,7 +70,7 @@ pub(crate) enum LabelOrOpCode {
     Branch(Box<str>),
     BranchIfNot(Box<str>),
     Funcall(Box<str>),
-    Get(Box<str>, usize),
+    Get(Box<str>),
     OpCode(OpCode),
 }
 
@@ -92,7 +102,7 @@ impl Compiler {
     pub fn compile(
         mut self,
         atoms: Vec<Rc<Atom>>,
-    ) -> Result<(Vec<(Box<str>, usize)>, OpCodes), Error> {
+    ) -> Result<(Vec<(Box<str>, usize, usize)>, OpCodes), Error> {
         //
         // Rewrite the atoms using our intermediate representation.
         //
@@ -123,7 +133,7 @@ impl Compiler {
             .fold(
                 (Vec::new(), Vec::new()),
                 |(mut offsets, mut opcodes), (name, ctxt)| {
-                    offsets.push((name, opcodes.len()));
+                    offsets.push((name, opcodes.len(), ctxt.argcnt));
                     opcodes.extend(ctxt.stream);
                     (offsets, opcodes)
                 },
@@ -142,33 +152,31 @@ impl Compiler {
                     let delta = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
                     Ok(OpCode::Brn(delta as isize))
                 }
-                LabelOrOpCode::Funcall(v) => {
+                LabelOrOpCode::Funcall(sym) => {
                     //
                     // Get the address of the symbol.
                     //
-                    let address = index
+                    let (addr, argcnt) = index
                         .iter()
-                        .find_map(|(k, a)| (k == &v).then_some(a))
-                        .copied()
-                        .ok_or(Error::InvalidSymbol(v))?;
+                        .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
+                        .ok_or(Error::InvalidSymbol(sym))?;
                     //
-                    // Generate the BRL opcode.
+                    // Push the funcall.
                     //
-                    Ok(OpCode::Psh(Immediate::Funcall(address)))
+                    Ok(OpCode::Psh(Immediate::funcall(addr, argcnt)))
                 }
-                LabelOrOpCode::Get(v, _) => {
+                LabelOrOpCode::Get(sym) => {
                     //
                     // Get the address of the symbol.
                     //
-                    let address = index
+                    let (addr, argcnt) = index
                         .iter()
-                        .find_map(|(k, a)| (k == &v).then_some(a))
-                        .copied()
-                        .ok_or(Error::UnresolvedSymbol(v))?;
+                        .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
+                        .ok_or(Error::UnresolvedSymbol(sym))?;
                     //
-                    // Generate the BRL opcode.
+                    // Push the funcall.
                     //
-                    Ok(OpCode::Psh(Immediate::Funcall(address)))
+                    Ok(OpCode::Psh(Immediate::funcall(addr, argcnt)))
                 }
                 LabelOrOpCode::OpCode(v) => Ok(v),
             })
@@ -216,7 +224,7 @@ impl Compiler {
             .iter()
             .filter_map(|v| match v {
                 LabelOrOpCode::Funcall(v) => Some(v.to_owned()),
-                LabelOrOpCode::Get(v, _) => Some(v.to_owned()),
+                LabelOrOpCode::Get(v) => Some(v.to_owned()),
                 _ => None,
             })
             .filter(|v| !index.contains(v.as_ref()))
@@ -347,8 +355,8 @@ impl Compiler {
 
 impl Compiler {
     fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
-        let mut ctxt = Context::default();
         let argcnt = defun.arguments().len();
+        let mut ctxt = Context::new(argcnt);
         //
         // Make sure the function does not exist.
         //
@@ -496,7 +504,7 @@ impl Compiler {
                 //
                 match op.as_ref() {
                     Statement::Operator(_) => (),
-                    _ => ctxt.stream.push_back(OpCode::Call.into()),
+                    _ => ctxt.stream.push_back(OpCode::Call(args.len()).into()),
                 }
                 //
                 // Update the stack.
@@ -543,7 +551,7 @@ impl Compiler {
                 Ok(())
             }
             Statement::Lambda(args, statements) => {
-                let mut next = Context::default();
+                let mut next = Context::new(args.len());
                 //
                 // Generate a name for the lambda.
                 //
@@ -770,7 +778,7 @@ impl Compiler {
         //
         let opcode = match ctxt.locals.get(symbol).and_then(|v| v.last()) {
             Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
-            None => LabelOrOpCode::Get(symbol.clone(), ctxt.stackn),
+            None => LabelOrOpCode::Get(symbol.clone()),
         };
         //
         // Push the opcode.
