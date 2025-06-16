@@ -1,8 +1,5 @@
 use clap::{arg, Parser};
-use sl::{
-    opcodes::{Arity, OpCode},
-    vm::VirtualMachine,
-};
+use sl::opcodes::{Arity, OpCode};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -41,13 +38,14 @@ fn main() -> Result<(), Error> {
     let (syms, ops): (Vec<(Box<str>, usize, Arity)>, Vec<OpCode>) =
         bincode::decode_from_std_read(&mut file, conf)?;
     //
-    // Build the virtual machine.
+    // Dump the binary.
     //
-    let mut vm = VirtualMachine::new(args.stack_size, args.trace);
-    //
-    // Run the binary.
-    //
-    vm.run(syms, ops)?;
+    ops.iter().enumerate().for_each(|(i, op)| {
+        if let Some((e, _, _)) = syms.iter().find(|(_, n, _)| *n == i) {
+            println!("{e}:");
+        }
+        println!("    {i:04} {op:?}");
+    });
     //
     // Done.
     //

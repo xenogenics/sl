@@ -8,8 +8,12 @@ use crate::{
     atom::Atom,
     error::Error,
     grammar::ListsParser,
-    ir::{FunctionDefinition, Location, Operator, Statement, Statements, TopLevelStatement, Value},
-    opcodes::{Immediate, OpCode, OpCodes},
+    ir::{
+        Arguments, FunctionDefinition, Location, Operator, Statement, Statements,
+        TopLevelStatement, Value,
+    },
+    opcodes::{Arity, Immediate, OpCode, OpCodes},
+    syscalls,
 };
 
 //
@@ -18,27 +22,27 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub(crate) struct Context {
-    argcnt: usize,
+    arity: Arity,
     locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
     stream: Stream,
 }
 
 impl Context {
-    fn new(argcnt: usize) -> Self {
+    fn new(arity: Arity) -> Self {
         Self {
-            argcnt,
+            arity,
             locals: HashMap::default(),
             stackn: 0,
             stream: Stream::default(),
         }
     }
 
-    fn track_arguments(&mut self, args: &[Box<str>]) {
+    fn track_arguments(&mut self, args: &Arguments) {
         self.track_arguments_and_closure(args, &BTreeSet::new());
     }
 
-    fn track_arguments_and_closure(&mut self, args: &[Box<str>], closure: &BTreeSet<Box<str>>) {
+    fn track_arguments_and_closure(&mut self, args: &Arguments, closure: &BTreeSet<Box<str>>) {
         //
         // Track the arguments.
         //
@@ -93,7 +97,7 @@ type Stream = VecDeque<LabelOrOpCode>;
 #[derive(Default)]
 pub struct Compiler {
     blocks: Vec<(Box<str>, Context)>,
-    defuns: HashMap<Box<str>, usize>,
+    defuns: HashMap<Box<str>, Arity>,
     labels: HashMap<Box<str>, usize>,
     lcount: usize,
 }
@@ -102,7 +106,7 @@ impl Compiler {
     pub fn compile(
         mut self,
         atoms: Vec<Rc<Atom>>,
-    ) -> Result<(Vec<(Box<str>, usize, usize)>, OpCodes), Error> {
+    ) -> Result<(Vec<(Box<str>, usize, Arity)>, OpCodes), Error> {
         //
         // Rewrite the atoms using our intermediate representation.
         //
@@ -133,7 +137,7 @@ impl Compiler {
             .fold(
                 (Vec::new(), Vec::new()),
                 |(mut offsets, mut opcodes), (name, ctxt)| {
-                    offsets.push((name, opcodes.len(), ctxt.argcnt));
+                    offsets.push((name, opcodes.len(), ctxt.arity));
                     opcodes.extend(ctxt.stream);
                     (offsets, opcodes)
                 },
@@ -355,8 +359,9 @@ impl Compiler {
 
 impl Compiler {
     fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
+        let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
-        let mut ctxt = Context::new(argcnt);
+        let mut ctxt = Context::new(arity);
         //
         // Make sure the function does not exist.
         //
@@ -371,7 +376,7 @@ impl Compiler {
         //
         // Track the function definition.
         //
-        self.defuns.insert(defun.name().clone(), argcnt);
+        self.defuns.insert(defun.name().clone(), arity);
         //
         // Rotate the arguments and the return address.
         //
@@ -529,14 +534,82 @@ impl Compiler {
                 //
                 // Grab the argument count.
                 //
-                let argcnt = self.defuns.get(symbol).copied().unwrap();
+                let arity = self.defuns.get(symbol).copied().unwrap();
                 //
-                // Pop the arguments.
+                // Pack the arguments depending on the arity.
                 //
-                if argcnt > 0 {
-                    ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
-                    ctxt.stream.push_back(OpCode::Pop(argcnt).into());
-                }
+                let argcnt = match arity {
+                    Arity::All => {
+                        /*
+                         * Pack the arguments into a list.
+                         */
+                        ctxt.stream.push_back(OpCode::Lst(args.len()).into());
+                        /*
+                         * Pop the argument.
+                         */
+                        ctxt.stream.push_back(OpCode::Rot(2).into());
+                        ctxt.stream.push_back(OpCode::Pop(1).into());
+                        /*
+                         * Update the stack.
+                         */
+                        ctxt.stackn -= args.len();
+                        ctxt.stackn += 1;
+                        /*
+                         * Return the argument count.
+                         */
+                        1
+                    }
+                    Arity::Some(n) => {
+                        /*
+                         * Rotate the stack to push the original arguments ahead.
+                         */
+                        for _ in 0..n {
+                            ctxt.stream.push_back(OpCode::Rot(2 * n as usize).into());
+                        }
+                        /*
+                         * Pop the old arguments.
+                         */
+                        ctxt.stream.push_back(OpCode::Pop(n as usize).into());
+                        /*
+                         * Return the argument count.
+                         */
+                        n
+                    }
+                    Arity::SomeWithRem(n) => {
+                        let argcnt = n + 1;
+                        let remlen = args.len() - n as usize;
+                        /*
+                         * Prepare the new arguments.
+                         */
+                        for _ in 0..remlen {
+                            ctxt.stream.push_back(OpCode::Rot(args.len()).into());
+                        }
+                        /*
+                         * Pack the remainder arguments into a list.
+                         */
+                        ctxt.stream.push_back(OpCode::Lst(remlen).into());
+                        /*
+                         * Restore the new arguments order.
+                         */
+                        ctxt.stream.push_back(OpCode::Rot(argcnt as usize).into());
+                        /*
+                         * Rotate the stack to push the original arguments ahead.
+                         */
+                        for _ in 0..argcnt {
+                            ctxt.stream
+                                .push_back(OpCode::Rot(2 * argcnt as usize).into());
+                        }
+                        /*
+                         * Pop the old arguments.
+                         */
+                        ctxt.stream.push_back(OpCode::Pop(argcnt as usize).into());
+                        /*
+                         * Return the argument count.
+                         */
+                        argcnt
+                    }
+                    Arity::None => 0,
+                };
                 //
                 // Compute the offset of the branch.
                 //
@@ -551,7 +624,7 @@ impl Compiler {
                 Ok(())
             }
             Statement::Lambda(args, statements) => {
-                let mut next = Context::new(args.len());
+                let mut next = Context::new(args.arity());
                 //
                 // Generate a name for the lambda.
                 //
@@ -670,13 +743,35 @@ impl Compiler {
                     //
                     // Predicates.
                     //
+                    Operator::IsChr => OpCode::IsChr.into(),
+                    Operator::IsNum => OpCode::IsNum.into(),
                     Operator::IsLst => OpCode::IsLst.into(),
                     Operator::IsNil => OpCode::IsNil.into(),
+                    Operator::IsSym => OpCode::IsSym.into(),
                 };
                 //
                 // Push the opcode.
                 //
                 ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn += 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            Statement::SysCall(sym) => {
+                //
+                // Get the syscall parameters.
+                //
+                let (index, argcnt) = syscalls::get(sym)?;
+                //
+                // Push the opcode.
+                //
+                let syscall = Immediate::Syscall(index, argcnt);
+                ctxt.stream.push_back(OpCode::Psh(syscall).into());
                 //
                 // Update the stack.
                 //
@@ -767,6 +862,7 @@ impl Compiler {
                 //
                 Ok(())
             }
+            Statement::Prog(stmts) => self.compile_statements(ctxt, stmts),
             Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
             Statement::Value(value) => self.compile_value(ctxt, value),
         }
@@ -806,7 +902,6 @@ impl Compiler {
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
-            Value::String(_) => todo!(),
             //
             // Only generated as a result of (quote).
             //
@@ -816,9 +911,23 @@ impl Compiler {
                 OpCode::Psh(Immediate::Symbol(symbol)).into()
             }
             Value::Pair(car, cdr) => {
+                //
+                // Process car and cdr.
+                //
                 self.compile_value(ctxt, cdr)?;
                 self.compile_value(ctxt, car)?;
-                OpCode::Cons.into()
+                //
+                // Push cons, consume 2 and producing 1.
+                //
+                let opcode = OpCode::Cons.into();
+                //
+                // Update the stack.
+                //
+                ctxt.stackn -= 2;
+                //
+                // Done.
+                //
+                opcode
             }
         };
         //
@@ -903,7 +1012,11 @@ impl Compiler {
         //
         // Build the function definition.
         //
-        let defun = FunctionDefinition::new(op.to_string().into_boxed_str(), args, stmts);
+        let defun = FunctionDefinition::new(
+            op.to_string().into_boxed_str(),
+            Arguments::List(args),
+            stmts,
+        );
         //
         // Done.
         //

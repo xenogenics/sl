@@ -2,7 +2,91 @@ use std::{collections::BTreeSet, fmt::Display, rc::Rc, str::FromStr};
 
 use strum_macros::EnumString;
 
-use crate::{atom::Atom, error::Error};
+use crate::{atom::Atom, error::Error, opcodes::Arity};
+
+//
+// Arguments.
+//
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Arguments {
+    Capture(Box<str>),
+    List(Vec<Box<str>>),
+    ListAndCapture(Vec<Box<str>>, Box<str>),
+    None,
+}
+
+impl Arguments {
+    pub fn arity(&self) -> Arity {
+        match self {
+            Arguments::Capture(_) => Arity::All,
+            Arguments::List(items) => Arity::Some(items.len() as u16),
+            Arguments::ListAndCapture(items, _) => Arity::SomeWithRem(items.len() as u16),
+            Arguments::None => Arity::None,
+        }
+    }
+
+    pub fn iter(&self) -> Box<dyn std::iter::DoubleEndedIterator<Item = &Box<str>> + '_> {
+        match self {
+            Arguments::Capture(v) => Box::new(Some(v).into_iter()),
+            Arguments::List(items) => Box::new(items.iter()),
+            Arguments::ListAndCapture(items, last) => {
+                Box::new(items.iter().chain(Some(last).into_iter()))
+            }
+            Arguments::None => Box::new(None.iter()),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Arguments::Capture(_) => 1,
+            Arguments::List(items) => items.len(),
+            Arguments::ListAndCapture(items, _) => items.len() + 1,
+            Arguments::None => 0,
+        }
+    }
+
+    fn from_pair(atom: Rc<Atom>, mut syms: Vec<Box<str>>) -> Result<Self, Error> {
+        /*
+         * Split the atom.
+         */
+        let Atom::Pair(car, cdr) = atom.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        /*
+         * Make sure CAR is a symbol.
+         */
+        let Atom::Symbol(symbol) = car.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        /*
+         * Save the symbol.
+         */
+        syms.push(symbol.clone());
+        /*
+         * Check CDR.
+         */
+        match cdr.as_ref() {
+            Atom::Nil => Ok(Self::List(syms)),
+            Atom::Pair(..) => Self::from_pair(cdr.clone(), syms),
+            Atom::Symbol(v) => Ok(Self::ListAndCapture(syms, v.clone())),
+            _ => Err(Error::ExpectedPairOrSymbol),
+        }
+    }
+}
+
+impl TryFrom<Rc<Atom>> for Arguments {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Error> {
+        match value.as_ref() {
+            Atom::Nil => Ok(Arguments::None),
+            Atom::Pair(..) => Self::from_pair(value, Vec::new()),
+            Atom::Symbol(v) => Ok(Arguments::Capture(v.clone())),
+            _ => return Err(Error::ExpectedPairOrSymbol),
+        }
+    }
+}
 
 //
 // Built-in operator.
@@ -50,10 +134,16 @@ pub enum Operator {
     //
     // Predicates.
     //
+    #[strum(serialize = "chr?")]
+    IsChr,
+    #[strum(serialize = "num?")]
+    IsNum,
     #[strum(serialize = "lst?")]
     IsLst,
     #[strum(serialize = "nil?")]
     IsNil,
+    #[strum(serialize = "sym?")]
+    IsSym,
 }
 
 //
@@ -68,7 +158,6 @@ pub enum Value {
     Char(u8),
     Number(i64),
     Pair(Box<Value>, Box<Value>),
-    String(Box<str>),
     Symbol(Box<str>),
 }
 
@@ -86,7 +175,6 @@ impl Display for Value {
             Value::Char(c) => write!(f, "{}", *c as char),
             Value::Number(v) => write!(f, "{v}"),
             Value::Pair(..) => write!(f, "[..]"),
-            Value::String(v) => write!(f, r#""{v}""#),
             Value::Symbol(v) => write!(f, "{v}"),
         }
     }
@@ -106,7 +194,10 @@ impl TryFrom<Rc<Atom>> for Value {
                 let cdr: Value = cdr.clone().try_into()?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::String(v) => Ok(Self::String(v.clone())),
+            Atom::String(v) => Ok(v.chars().rev().fold(Value::Nil, |mut acc, v| {
+                acc = Value::Pair(Value::Char(v as u8).into(), acc.into());
+                acc
+            })),
             Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             Atom::Wildcard => todo!(),
         }
@@ -154,13 +245,15 @@ pub enum Statement {
     // Function application.
     //
     Apply(Box<Statement>, Statements, Location),
-    Lambda(Vec<Box<str>>, Statements),
+    Lambda(Arguments, Statements),
     Operator(Operator),
+    SysCall(Box<str>),
     //
     // Control structures.
     //
     IfThenElse(Box<Statement>, Box<Statement>, Option<Box<Statement>>),
     Let(Vec<(Box<str>, Statement)>, Statements),
+    Prog(Statements),
     //
     // Symbol and value.
     //
@@ -352,22 +445,7 @@ impl Statement {
                     //
                     // Build the argument list.
                     //
-                    let args = args.iter().try_fold(Vec::new(), |mut acc, v| {
-                        //
-                        // Make sure the value is a symbol.
-                        //
-                        let Atom::Symbol(symbol) = v.as_ref() else {
-                            return Err(Error::ExpectedSymbol);
-                        };
-                        //
-                        // Push the symbol.
-                        //
-                        acc.push(symbol.clone());
-                        //
-                        // Done.
-                        //
-                        Ok(acc)
-                    })?;
+                    let args: Arguments = args.clone().try_into()?;
                     //
                     // Build the statement list.
                     //
@@ -376,6 +454,39 @@ impl Statement {
                     // Done.
                     //
                     Ok(Self::Lambda(args, stmts))
+                }
+                //
+                // Prog.
+                //
+                "prog" => {
+                    let stmts: Statements = rem.clone().try_into()?;
+                    Ok(Self::Prog(stmts))
+                }
+                //
+                // System call.
+                //
+                "syscall" => {
+                    //
+                    // Split the syscall.
+                    //
+                    let Atom::Pair(sym, rem) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Make sure the first argument is a symbol
+                    //
+                    let Atom::Symbol(sym) = sym.as_ref() else {
+                        return Err(Error::ExpectedSymbol);
+                    };
+                    //
+                    // Build the statements.
+                    //
+                    let stmt = Box::new(Statement::SysCall(sym.clone()));
+                    let stmts: Statements = rem.clone().try_into()?;
+                    //
+                    // Done.
+                    //
+                    Ok(Self::Apply(stmt, stmts, Location::Any))
                 }
                 //
                 // Other symbols.
@@ -496,11 +607,12 @@ impl Display for Statement {
                 write!(f, ")")
             }
             Statement::Operator(v) => write!(f, "{v}"),
+            Statement::SysCall(sym) => write!(f, "(syscall {sym})"),
             Statement::IfThenElse(cond, then, None) => {
-                write!(f, "(if {cond} {then}")
+                write!(f, "(if {cond} {then})")
             }
             Statement::IfThenElse(cond, then, Some(else_)) => {
-                write!(f, "(if {cond} {then} {else_}")
+                write!(f, "(if {cond} {then} {else_})")
             }
             Statement::Let(bindings, statements) => {
                 write!(f, "(let (")?;
@@ -511,6 +623,7 @@ impl Display for Statement {
                 write!(f, "{statements}")?;
                 write!(f, ")")
             }
+            Statement::Prog(stmts) => write!(f, "(prog {stmts})"),
             Statement::Symbol(symbol) => write!(f, "{symbol}"),
             Statement::Value(value) => write!(f, "{value}"),
         }
@@ -637,10 +750,10 @@ impl TryFrom<Rc<Atom>> for TopLevelStatement {
 //
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct FunctionDefinition(Box<str>, Vec<Box<str>>, Statements);
+pub struct FunctionDefinition(Box<str>, Arguments, Statements);
 
 impl FunctionDefinition {
-    pub fn new(name: Box<str>, args: Vec<Box<str>>, stmts: Statements) -> Self {
+    pub fn new(name: Box<str>, args: Arguments, stmts: Statements) -> Self {
         Self(name, args, stmts)
     }
 
@@ -648,7 +761,7 @@ impl FunctionDefinition {
         &self.0
     }
 
-    pub fn arguments(&self) -> &[Box<str>] {
+    pub fn arguments(&self) -> &Arguments {
         &self.1
     }
 
@@ -721,22 +834,7 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
         //
         // Build the argument list.
         //
-        let args = args.iter().try_fold(Vec::new(), |mut acc, v| {
-            //
-            // Make sure the value is a symbol.
-            //
-            let Atom::Symbol(symbol) = v.as_ref() else {
-                return Err(Error::ExpectedSymbol);
-            };
-            //
-            // Push the symbol.
-            //
-            acc.push(symbol.clone());
-            //
-            // Done.
-            //
-            Ok(acc)
-        })?;
+        let args: Arguments = args.clone().try_into()?;
         //
         // Check if there is a comment.
         //

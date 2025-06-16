@@ -48,7 +48,36 @@ impl Atom {
     }
 
     pub fn string(v: &str) -> Rc<Atom> {
-        Self::String(v.into()).into()
+        let mut result = String::new();
+        /*
+         * Trim the double quotes.
+         */
+        let v = v.trim_matches('"');
+        /*
+         * Parse the escape sequences.
+         */
+        let mut chars = v.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                match chars.next() {
+                    Some('0') => result.push('\0'),
+                    Some('e') => result.push('\x1B'),
+                    Some('n') => result.push('\n'),
+                    Some('r') => result.push('\r'),
+                    Some('t') => result.push('\t'),
+                    Some('"') => result.push('"'),
+                    Some('\\') => result.push('\\'),
+                    Some(c) => result.push(c), // Handle invalid escape
+                    None => break,
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        /*
+         * Done.
+         */
+        Self::String(result.into_boxed_str()).into()
     }
 
     pub fn symbol(v: &str) -> Rc<Atom> {
