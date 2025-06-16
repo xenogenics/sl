@@ -563,6 +563,7 @@ dependencies = [
  "env_logger",
  "lalrpop",
  "lalrpop-util",
+ "libc",
  "map-macro",
  "strum",
  "strum_macros",

@@ -124,7 +124,7 @@ mod compiler {
         compiler::{Compiler, Context, LabelOrOpCode},
         grammar::ListsParser,
         ir::Statement,
-        opcodes::{Immediate, OpCode},
+        opcodes::{Arity, Immediate, OpCode},
     };
 
     #[test]
@@ -453,7 +453,7 @@ mod compiler {
                 OpCode::Psh(Immediate::Number(3)),
                 OpCode::Psh(Immediate::Number(2)),
                 OpCode::Psh(Immediate::Number(1)),
-                OpCode::Psh(Immediate::Funcall(0, 3)),
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(3))),
                 OpCode::Call(3),
                 OpCode::Ret,
             ]
@@ -471,26 +471,26 @@ mod compiler {
         assert_eq!(
             result,
             vec![
-                OpCode::Rot(2),                        // [ret0, N]
-                OpCode::Psh(Immediate::Number(1)),     // [ret0, N, 1]
-                OpCode::Get(2),                        // [ret0, N, 1, N]
-                OpCode::Le,                            // [ret0, N, T/nil]
-                OpCode::Brn(3),                        // [ret0, N]
-                OpCode::Get(1),                        // [ret0, N, N]
-                OpCode::Br(12),                        //
-                OpCode::Psh(Immediate::Number(2)),     // [ret0, N, 2]
-                OpCode::Get(2),                        // [ret0, N, 1, N]
-                OpCode::Sub,                           // [ret0, N, N-2]
-                OpCode::Psh(Immediate::Funcall(0, 1)), // [ret0, N, N-2, fun0]
-                OpCode::Call(1),                       // [ret0, N, N-2, ret1]
-                OpCode::Psh(Immediate::Number(1)),     // [ret0, N, R0, 1]
-                OpCode::Get(3),                        // [ret0, N, R0, 1, N]
-                OpCode::Sub,                           // [ret0, N, R0, N-1]
-                OpCode::Psh(Immediate::Funcall(0, 1)), // [ret0, N, R0, N-1, fun0]
-                OpCode::Call(1),                       // [ret0, N, N-1, ret1]
-                OpCode::Add,                           // [ret0, N, R0+R1]
-                OpCode::Rot(2),                        // [ret0, R0+R1, N]
-                OpCode::Pop(1),                        // [ret0, R0+R1]
+                OpCode::Rot(2),                                     // [ret0, N]
+                OpCode::Psh(Immediate::Number(1)),                  // [ret0, N, 1]
+                OpCode::Get(2),                                     // [ret0, N, 1, N]
+                OpCode::Le,                                         // [ret0, N, T/nil]
+                OpCode::Brn(3),                                     // [ret0, N]
+                OpCode::Get(1),                                     // [ret0, N, N]
+                OpCode::Br(12),                                     //
+                OpCode::Psh(Immediate::Number(2)),                  // [ret0, N, 2]
+                OpCode::Get(2),                                     // [ret0, N, 1, N]
+                OpCode::Sub,                                        // [ret0, N, N-2]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, N, N-2, fun0]
+                OpCode::Call(1),                                    // [ret0, N, N-2, ret1]
+                OpCode::Psh(Immediate::Number(1)),                  // [ret0, N, R0, 1]
+                OpCode::Get(3),                                     // [ret0, N, R0, 1, N]
+                OpCode::Sub,                                        // [ret0, N, R0, N-1]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, N, R0, N-1, fun0]
+                OpCode::Call(1),                                    // [ret0, N, N-1, ret1]
+                OpCode::Add,                                        // [ret0, N, R0+R1]
+                OpCode::Rot(2),                                     // [ret0, R0+R1, N]
+                OpCode::Pop(1),                                     // [ret0, R0+R1]
                 OpCode::Ret
             ]
         );
@@ -520,19 +520,19 @@ mod compiler {
                 //
                 // Test.
                 //
-                OpCode::Rot(2),                        // [ret0, a]
-                OpCode::Psh(Immediate::Funcall(0, 2)), // [ret0, a, fun0]
-                OpCode::Pak(1),                        // [ret0, a, pak0]
-                OpCode::Psh(Immediate::Number(2)),     // [ret0, a, pak0, 2]
-                OpCode::Psh(Immediate::Number(1)),     // [ret0, a, pak0, 2, 1]
-                OpCode::Get(3),                        // [ret0, a, pak0, 2, 1, pak0]
-                OpCode::Call(2),                       // [ret0, a, pak0, 2, 1, ret1]
-                OpCode::Get(3),                        // [ret0, a, pak0, 3, a]
-                OpCode::Sub,                           // [ret0, a, pak0, a-3]
-                OpCode::Rot(2),                        // [ret0, a, a-3, pak0]
-                OpCode::Pop(1),                        // [ret0, a, a-3]
-                OpCode::Rot(2),                        // [ret0, a-3, a]
-                OpCode::Pop(1),                        // [ret0, a-3]
+                OpCode::Rot(2),                                     // [ret0, a]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))), // [ret0, a, fun0]
+                OpCode::Pak(1),                                     // [ret0, a, pak0]
+                OpCode::Psh(Immediate::Number(2)),                  // [ret0, a, pak0, 2]
+                OpCode::Psh(Immediate::Number(1)),                  // [ret0, a, pak0, 2, 1]
+                OpCode::Get(3),                                     // [ret0, a, pak0, 2, 1, pak0]
+                OpCode::Call(2),                                    // [ret0, a, pak0, 2, 1, ret1]
+                OpCode::Get(3),                                     // [ret0, a, pak0, 3, a]
+                OpCode::Sub,                                        // [ret0, a, pak0, a-3]
+                OpCode::Rot(2),                                     // [ret0, a, a-3, pak0]
+                OpCode::Pop(1),                                     // [ret0, a, a-3]
+                OpCode::Rot(2),                                     // [ret0, a-3, a]
+                OpCode::Pop(1),                                     // [ret0, a-3]
                 OpCode::Ret
             ]
         )
@@ -569,30 +569,30 @@ mod compiler {
                 //
                 // (\ (b) ((\ () (+ a b)))
                 //
-                OpCode::Rot(3),                        // [ret0, b, a]
-                OpCode::Get(1),                        // [ret0, b, a, a]
-                OpCode::Get(3),                        // [ret0, b, a, a, b]
-                OpCode::Psh(Immediate::Funcall(0, 0)), // [ret0, b, a, a, b, fun0]
-                OpCode::Pak(3),                        // [ret0, b, a, pak0]
-                OpCode::Call(0),                       // [ret0, b, a, a+b]
-                OpCode::Rot(3),                        // [ret0, a+b, b, a]
-                OpCode::Pop(2),                        // [ret0, a+b]
-                OpCode::Ret,                           // [a+b]
+                OpCode::Rot(3),                                  // [ret0, b, a]
+                OpCode::Get(1),                                  // [ret0, b, a, a]
+                OpCode::Get(3),                                  // [ret0, b, a, a, b]
+                OpCode::Psh(Immediate::Funcall(0, Arity::None)), // [ret0, b, a, a, b, fun0]
+                OpCode::Pak(3),                                  // [ret0, b, a, pak0]
+                OpCode::Call(0),                                 // [ret0, b, a, a+b]
+                OpCode::Rot(3),                                  // [ret0, a+b, b, a]
+                OpCode::Pop(2),                                  // [ret0, a+b]
+                OpCode::Ret,                                     // [a+b]
                 //
                 // (def test ..)
                 //
-                OpCode::Rot(2),                        // [ret0, a]
-                OpCode::Get(1),                        // [ret0, a, a]
-                OpCode::Psh(Immediate::Funcall(7, 1)), // [ret0, a, a, fun7]
-                OpCode::Pak(2),                        // [ret0, a, pak0]
-                OpCode::Psh(Immediate::Number(1)),     // [ret0, a, pak0, 1]
-                OpCode::Get(2),                        // [ret0, a, pak0, 1, pak0]
-                OpCode::Call(1),                       // [ret0, a, pak0, a+1]
-                OpCode::Rot(2),                        // [ret0, a, a+1, pak0]
-                OpCode::Pop(1),                        // [ret0, a, a+1]
-                OpCode::Rot(2),                        // [ret0, a+1, a]
-                OpCode::Pop(1),                        // [ret0, a+1]
-                OpCode::Ret                            // [a+1]
+                OpCode::Rot(2),                                     // [ret0, a]
+                OpCode::Get(1),                                     // [ret0, a, a]
+                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))), // [ret0, a, a, fun7]
+                OpCode::Pak(2),                                     // [ret0, a, pak0]
+                OpCode::Psh(Immediate::Number(1)),                  // [ret0, a, pak0, 1]
+                OpCode::Get(2),                                     // [ret0, a, pak0, 1, pak0]
+                OpCode::Call(1),                                    // [ret0, a, pak0, a+1]
+                OpCode::Rot(2),                                     // [ret0, a, a+1, pak0]
+                OpCode::Pop(1),                                     // [ret0, a, a+1]
+                OpCode::Rot(2),                                     // [ret0, a+1, a]
+                OpCode::Pop(1),                                     // [ret0, a+1]
+                OpCode::Ret                                         // [a+1]
             ]
         )
     }
@@ -635,23 +635,27 @@ mod compiler {
     #[test]
     fn def_if_then_with_tailcall_optimization() {
         let parser = ListsParser::new();
-        let atoms = parser.parse("(def test(a) (if a (test (cdr a))))").unwrap();
+        let atoms = parser
+            .parse("(def test (a b) (if a (test (cdr a) (cdr b))))")
+            .unwrap();
         let compiler = Compiler::default();
         let (_, result) = compiler.compile(atoms).unwrap();
         assert_eq!(
             result,
             vec![
-                OpCode::Rot(2),              // [ret0, a]
-                OpCode::Get(1),              // [ret0, a, a]
-                OpCode::Brn(7),              //
-                OpCode::Get(1),              // [ret0, a, a]
-                OpCode::Cdr,                 // [ret0, a, cdr(a)]
-                OpCode::Rot(2),              // [ret0, cdr(a), a]
-                OpCode::Pop(1),              // [ret0, cdr(a)]
-                OpCode::Br(-6),              //
-                OpCode::Psh(Immediate::Nil), // [ret0, a, nil]
-                OpCode::Rot(2),              // [ret0, nil, a]
-                OpCode::Pop(1),              // [ret0, nil]
+                OpCode::Rot(3),              // [ret0, b, a]
+                OpCode::Get(1),              // [ret0, b, a, a]
+                OpCode::Brn(9),              //
+                OpCode::Get(2),              // [ret0, b, a, a]
+                OpCode::Cdr,                 // [ret0, b, a, cdr(b)]
+                OpCode::Get(2),              // [ret0, b, a, cdr(b), a]
+                OpCode::Cdr,                 // [ret0, b, a, cdr(b), cdr(a)]
+                OpCode::Rtm(4, 2),           // [ret0, cdr(b), cdr(a), b, a, ]
+                OpCode::Pop(2),              // [ret0, cdr(b), cdr(a)]
+                OpCode::Br(-8),              //
+                OpCode::Psh(Immediate::Nil), // [ret0, b, a, nil]
+                OpCode::Rot(3),              // [ret0, nil, b, a]
+                OpCode::Pop(2),              // [ret0, nil]
                 OpCode::Ret                  // [nil]
             ]
         );
@@ -689,6 +693,155 @@ mod compiler {
                 OpCode::Rot(2),  // [ret0, cdr(a), a]
                 OpCode::Pop(1),  // [ret0, cdr(a)]
                 OpCode::Br(-11), //
+            ]
+        );
+    }
+
+    #[test]
+    fn def_capture_all_arguments_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def count_args_r (A)
+                    (if A
+                        (+ 1 (count_args_r (cdr A)))
+                        0))
+
+                (def count_args A (count_args_r A))
+
+                (def main ()
+                    (count_args 1 2 3 4))
+                "#,
+            )
+            .unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                //
+                // count_args_r
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::Brn(8),
+                OpCode::Get(1),
+                OpCode::Cdr,
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Add,
+                OpCode::Br(2),
+                OpCode::Psh(Immediate::Number(0)),
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // count_args
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // main
+                //
+                OpCode::Psh(Immediate::Number(4)),
+                OpCode::Psh(Immediate::Number(3)),
+                OpCode::Psh(Immediate::Number(2)),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(14, Arity::All)),
+                OpCode::Call(4),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_empty_capture_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def count_args A (if A 1 0))
+
+                (def main ()
+                    (count_args))
+                "#,
+            )
+            .unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                //
+                // count_args
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::Brn(3),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Br(2),
+                OpCode::Psh(Immediate::Number(0)),
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // main
+                //
+                OpCode::Psh(Immediate::Funcall(0, Arity::All)),
+                OpCode::Call(0),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_remainder_capture_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def select (A B . C) (if C A B))
+
+                (def main ()
+                    (select 1 2 3 4))
+                "#,
+            )
+            .unwrap();
+        let compiler = Compiler::default();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        println!("{:?}", result);
+        assert_eq!(
+            result,
+            vec![
+                //
+                // select().
+                //
+                OpCode::Rot(4), // [ret0, c, b, a]
+                OpCode::Get(3), // [ret0, c, b, a, c]
+                OpCode::Brn(3), //
+                OpCode::Get(1), // [ret0, c, b, a, a]
+                OpCode::Br(2),  //
+                OpCode::Get(2), // [ret0, c, b, a, b]
+                OpCode::Rot(4), // [ret0, res0, c, b, a]
+                OpCode::Pop(3), // [ret0, res0]
+                OpCode::Ret,    // [res0]
+                //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(4)),
+                OpCode::Psh(Immediate::Number(3)),
+                OpCode::Psh(Immediate::Number(2)),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(0, Arity::SomeWithRem(2))),
+                OpCode::Call(4),
+                OpCode::Ret
             ]
         );
     }

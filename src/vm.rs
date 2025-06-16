@@ -3,8 +3,9 @@ use std::rc::Rc;
 use crate::{
     error::Error,
     heap,
-    opcodes::{Immediate, OpCode},
+    opcodes::{Arity, Immediate, OpCode},
     stack::{Stack, Value},
+    syscalls,
 };
 
 pub struct VirtualMachine {
@@ -22,7 +23,7 @@ impl VirtualMachine {
 
     pub fn run(
         &mut self,
-        syms: Vec<(Box<str>, usize, usize)>,
+        syms: Vec<(Box<str>, usize, Arity)>,
         ops: Vec<OpCode>,
     ) -> Result<(), Error> {
         //
@@ -56,7 +57,7 @@ impl VirtualMachine {
             // Print trace.
             //
             if self.trace {
-                println!("{:?}", self.stack);
+                println!("---- {:?}", self.stack);
                 println!("{pc:04} {:?}", ops[pc]);
             }
             //
@@ -203,6 +204,14 @@ impl VirtualMachine {
                 //
                 // Predicates.
                 //
+                OpCode::IsChr => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Char(_)));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsNum => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Number(_)));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
                 OpCode::IsLst => {
                     let r = match self.stack.pop() {
                         Value::Heap(value) => match value.as_ref() {
@@ -216,6 +225,10 @@ impl VirtualMachine {
                 }
                 OpCode::IsNil => {
                     let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsSym => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Symbol(_)));
                     self.stack.push(Value::Immediate(r.into()));
                 }
                 //
@@ -240,30 +253,115 @@ impl VirtualMachine {
                         //
                         // Decode the funcall.
                         //
-                        let (addr, argexp) = self.stack.pop().as_immediate().as_funcall();
-                        //
-                        // Pack in case of currying.
-                        //
-                        if argcnt + argpak < argexp as usize {
-                            let imm = Immediate::Funcall(addr, argexp);
-                            self.stack.push(Value::Immediate(imm));
-                            self.stack.pack(argcnt + argpak, argcnt + paklen);
+                        match self.stack.pop().as_immediate() {
+                            Immediate::Funcall(addr, Arity::All) => {
+                                //
+                                // Collect the arguments into a list.
+                                //
+                                self.stack.list(argcnt);
+                                //
+                                // Push the return link and go to the funcall address.
+                                //
+                                self.stack.push(Value::Link(pc + 1).into());
+                                pc = addr as usize;
+                                continue;
+                            }
+                            Immediate::Funcall(addr, arity @ Arity::Some(argexp)) => {
+                                //
+                                // Pack in case of currying.
+                                //
+                                if argcnt + argpak < argexp as usize {
+                                    let imm = Immediate::Funcall(addr, arity);
+                                    self.stack.push(Value::Immediate(imm));
+                                    self.stack.pack(argcnt + argpak, argcnt + paklen);
+                                }
+                                //
+                                // Push the return link and go to the funcall address.
+                                //
+                                else {
+                                    self.stack.push(Value::Link(pc + 1).into());
+                                    pc = addr as usize;
+                                    continue;
+                                }
+                            }
+                            Immediate::Funcall(addr, arity @ Arity::SomeWithRem(argexp)) => {
+                                //
+                                // Pack in case of currying.
+                                //
+                                if argcnt + argpak < argexp as usize {
+                                    let imm = Immediate::Funcall(addr, arity);
+                                    self.stack.push(Value::Immediate(imm));
+                                    self.stack.pack(argcnt + argpak, argcnt + paklen);
+                                }
+                                //
+                                // Push the return link and go to the funcall address.
+                                //
+                                else {
+                                    //
+                                    // Prepare the arguments, only if there are more
+                                    // provided than expected.
+                                    //
+                                    if argcnt + argpak > argexp as usize {
+                                        for _ in 0..argexp {
+                                            self.stack.rotate(argcnt + argpak);
+                                        }
+                                    }
+                                    //
+                                    // Collect the remaining arguments into a list.
+                                    //
+                                    self.stack.list(argcnt + argpak - argexp as usize);
+                                    //
+                                    // Rotate the arguments.
+                                    //
+                                    self.stack.rotate(argexp as usize + 1);
+                                    //
+                                    // Push the link value.
+                                    //
+                                    self.stack.push(Value::Link(pc + 1).into());
+                                    pc = addr as usize;
+                                    continue;
+                                }
+                            }
+                            Immediate::Syscall(index, argexp) => {
+                                //
+                                // Pack in case of currying.
+                                //
+                                if argcnt + argpak < argexp as usize {
+                                    let imm = Immediate::Syscall(index, argexp);
+                                    self.stack.push(Value::Immediate(imm));
+                                    self.stack.pack(argcnt + argpak, argcnt + paklen);
+                                }
+                                //
+                                // Push the return link and go to the funcall address.
+                                //
+                                else {
+                                    let values = self.stack.slice_n(argexp as usize);
+                                    let res = syscalls::call(index, values);
+                                    self.stack.drop(argexp as usize);
+                                    self.stack.push(res);
+                                }
+                            }
+                            _ => panic!("Expected a funcall or syscall"),
                         }
+                    }
+                    Value::Immediate(Immediate::Funcall(addr, Arity::All)) => {
+                        //
+                        // Collect the arguments into a list.
+                        //
+                        self.stack.list(argcnt);
                         //
                         // Push the return link and go to the funcall address.
                         //
-                        else {
-                            self.stack.push(Value::Link(pc + 1).into());
-                            pc = addr as usize;
-                            continue;
-                        }
+                        self.stack.push(Value::Link(pc + 1).into());
+                        pc = addr as usize;
+                        continue;
                     }
-                    Value::Immediate(Immediate::Funcall(addr, argexp)) => {
+                    Value::Immediate(Immediate::Funcall(addr, arity @ Arity::Some(argexp))) => {
                         //
                         // Pack in case of currying.
                         //
                         if argcnt < argexp as usize {
-                            let imm = Immediate::Funcall(addr, argexp);
+                            let imm = Immediate::Funcall(addr, arity);
                             self.stack.push(Value::Immediate(imm));
                             self.stack.pack(argcnt, argcnt + 1);
                         }
@@ -276,7 +374,67 @@ impl VirtualMachine {
                             continue;
                         }
                     }
-                    _ => panic!("Expected a function address or closure"),
+                    Value::Immediate(Immediate::Funcall(
+                        addr,
+                        arity @ Arity::SomeWithRem(argexp),
+                    )) => {
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt < argexp as usize {
+                            let imm = Immediate::Funcall(addr, arity);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt, argcnt + 1);
+                        }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            //
+                            // Prepare the arguments, only if there are more
+                            // provided than expected.
+                            //
+                            if argcnt > argexp as usize {
+                                for _ in 0..argexp {
+                                    self.stack.rotate(argcnt);
+                                }
+                            }
+                            //
+                            // Collect the remaining arguments into a list.
+                            //
+                            self.stack.list(argcnt - argexp as usize);
+                            //
+                            // Rotate the arguments.
+                            //
+                            self.stack.rotate(argexp as usize + 1);
+                            //
+                            // Push the link value.
+                            //
+                            self.stack.push(Value::Link(pc + 1).into());
+                            pc = addr as usize;
+                            continue;
+                        }
+                    }
+                    Value::Immediate(Immediate::Syscall(index, argexp)) => {
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt < argexp as usize {
+                            let imm = Immediate::Syscall(index, argexp);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt, argcnt + 1);
+                        }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            let values = self.stack.slice_n(argexp as usize);
+                            let res = syscalls::call(index, values);
+                            self.stack.drop(argexp as usize);
+                            self.stack.push(res);
+                        }
+                    }
+                    _ => panic!("Expected a closure, funcall or syscall"),
                 },
                 OpCode::Ret => {
                     pc = self.stack.unlink().link();
@@ -287,10 +445,12 @@ impl VirtualMachine {
                 //
                 OpCode::Dup(v) => self.stack.dup(v),
                 OpCode::Get(v) => self.stack.get(v),
+                OpCode::Lst(n) => self.stack.list(n),
                 OpCode::Pak(v) => self.stack.pack(0, v),
                 OpCode::Pop(v) => self.stack.drop(v),
                 OpCode::Psh(v) => self.stack.push(Value::from(v).into()),
                 OpCode::Rot(n) => self.stack.rotate(n),
+                OpCode::Rtm(m, n) => self.stack.rotate_n(m, n),
                 OpCode::Swp => self.stack.swap(),
             }
             //

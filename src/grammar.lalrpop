@@ -8,7 +8,7 @@ match {
 	"(", ")", ".", "'",
 	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
 	r"-?[0-9]+" => Number,
-	r#""([^"]|\\")*""# => String,
+	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
 	"nil" => Nil,
 	"T" => True,
 	"_" => Wildcard,

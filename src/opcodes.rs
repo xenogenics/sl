@@ -1,6 +1,20 @@
 use bincode::{Decode, Encode};
 
 //
+// Arity.
+//
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Encode, Decode)]
+#[repr(u32)]
+pub enum Arity {
+    #[default]
+    All,
+    Some(u16),
+    SomeWithRem(u16),
+    None,
+}
+
+//
 // Immediate values.
 //
 
@@ -10,16 +24,17 @@ pub enum Immediate {
     True,
     Char(u8),
     Number(i64),
-    Funcall(u32, u32),
+    Funcall(u32, Arity),
+    Syscall(u32, u32),
     Symbol([u8; 15]),
 }
 
 impl Immediate {
-    pub const fn funcall(idx: usize, cnt: usize) -> Self {
-        Self::Funcall(idx as u32, cnt as u32)
+    pub const fn funcall(idx: usize, arity: Arity) -> Self {
+        Self::Funcall(idx as u32, arity)
     }
 
-    pub const fn as_funcall(&self) -> (u32, u32) {
+    pub const fn as_funcall(&self) -> (u32, Arity) {
         match self {
             Immediate::Funcall(idx, cnt) => (*idx, *cnt),
             _ => panic!("Expected a funcall"),
@@ -77,8 +92,11 @@ pub enum OpCode {
     //
     // Predicates.
     //
+    IsChr,
     IsLst,
     IsNil,
+    IsNum,
+    IsSym,
     //
     // Control flow.
     //
@@ -91,10 +109,12 @@ pub enum OpCode {
     //
     Dup(usize),
     Get(usize),
+    Lst(usize),
     Pak(usize),
     Pop(usize),
     Psh(Immediate),
     Rot(usize),
+    Rtm(usize, usize),
     Swp,
 }
 

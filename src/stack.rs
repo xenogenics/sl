@@ -76,6 +76,10 @@ impl Stack {
         unsafe { self.0.pop().unwrap_unchecked() }
     }
 
+    pub fn slice_n(&mut self, n: usize) -> &[Value] {
+        &self.0[self.0.len() - n..]
+    }
+
     pub fn drop(&mut self, n: usize) {
         for _ in 0..n {
             self.0.pop();
@@ -93,6 +97,50 @@ impl Stack {
         self.push(self.0[self.0.len() - n].clone());
     }
 
+    pub fn list(&mut self, n: usize) {
+        //
+        // Return NIL on empty list.
+        //
+        if n == 0 {
+            self.0.push(Value::Immediate(Immediate::Nil));
+        }
+        //
+        // Combine the N elements into a list.
+        else {
+            //
+            // Build the list from the N elements of the stack.
+            //
+            let result = self.0[self.0.len() - n..].iter().fold(
+                Rc::new(heap::Value::Immediate(Immediate::Nil)),
+                |acc, v| {
+                    //
+                    // Get the next element.
+                    //
+                    let w = match v {
+                        Value::Closure(v) => heap::Value::Closure(v.clone()).into(),
+                        Value::Heap(v) => v.clone(),
+                        Value::Immediate(v) => heap::Value::Immediate(*v).into(),
+                        Value::Link(_) => panic!(),
+                    };
+                    //
+                    // Build the pair.
+                    //
+                    Rc::new(heap::Value::Pair(w, acc))
+                },
+            );
+            //
+            // Drop the N element from the stack.
+            //
+            for _ in 0..n {
+                self.0.pop();
+            }
+            //
+            // Push the result.
+            //
+            self.0.push(Value::Heap(result));
+        }
+    }
+
     pub const fn rotate(&mut self, n: usize) {
         unsafe {
             let len = self.0.len();
@@ -101,6 +149,11 @@ impl Stack {
             p.copy_to(p.add(1), n - 1);
             p.write(cur);
         }
+    }
+
+    pub fn rotate_n(&mut self, m: usize, n: usize) {
+        let offst = self.0.len() - m;
+        self.0[offst..].rotate_right(n);
     }
 
     pub const fn swap(&mut self) {

@@ -34,6 +34,8 @@ pub enum Error {
     InvalidLabel(Box<str>),
     #[error("Invalid symbol: {0}")]
     InvalidSymbol(Box<str>),
+    #[error("Invalid system call: {0}")]
+    InvalidSystemCall(Box<str>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error("Main endpoint not defined")]

@@ -14,6 +14,13 @@
 			(fun (car lst) (foldr fun (cdr lst) acc)))
 		(fun lst acc)))
 
+(def iter (fun lst)
+	"Iterator of LST by calling FUN on every element."
+	(if (not (nil? lst))
+		(prog
+			(fun (car lst))
+			(iter fun (cdr lst)))))
+
 (def map (fun lst)
 	"Sequentially apply FUN to all elements of LST."
 	(if (and (not (nil? lst)) (lst? lst))
