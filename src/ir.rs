@@ -8,7 +8,7 @@ use crate::{atom::Atom, error::Error, opcodes::Arity};
 // Arguments.
 //
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Arguments {
     Capture(Box<str>),
     List(Vec<Box<str>>),
@@ -146,11 +146,37 @@ pub enum Operator {
     IsSym,
 }
 
+impl Operator {
+    pub fn arity(&self) -> usize {
+        match self {
+            Operator::Add => 2,
+            Operator::Sub => 2,
+            Operator::Ge => 2,
+            Operator::Gt => 2,
+            Operator::Le => 2,
+            Operator::Lt => 2,
+            Operator::And => 2,
+            Operator::Equ => 2,
+            Operator::Neq => 2,
+            Operator::Not => 1,
+            Operator::Or => 2,
+            Operator::Car => 1,
+            Operator::Cdr => 1,
+            Operator::Cons => 2,
+            Operator::IsChr => 1,
+            Operator::IsNum => 1,
+            Operator::IsLst => 1,
+            Operator::IsNil => 1,
+            Operator::IsSym => 1,
+        }
+    }
+}
+
 //
 // Value.
 //
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Value {
     #[default]
     Nil,
@@ -229,7 +255,7 @@ impl<'a> std::iter::Iterator for ValueIterator<'a> {
 // Application location.
 //
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Location {
     Any,
     Tail,
@@ -239,7 +265,7 @@ pub enum Location {
 // Statement.
 //
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Statement {
     //
     // Function application.
@@ -341,6 +367,108 @@ impl Statement {
                 // Quote.
                 //
                 "quote" => Value::try_from(rem).map(Statement::Value),
+                //
+                // Control flow: cond.
+                //
+                "cond" => {
+                    //
+                    // Unpack the value expression.
+                    //
+                    let Atom::Pair(value, cases) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse the value.
+                    //
+                    let value: Statement = value.clone().try_into()?;
+                    //
+                    // Expand the cases into a reversable collection.
+                    //
+                    let cases: Vec<_> = cases.iter().collect();
+                    //
+                    // Find the index of the catch-all statement, if any.
+                    //
+                    let catchall_index = cases
+                        .iter()
+                        .position(|e| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(cond, _) = e.as_ref() else {
+                                return false;
+                            };
+                            //
+                            // Check the condition.
+                            //
+                            matches!(cond.as_ref(), &Atom::Wildcard)
+                        })
+                        .unwrap_or(cases.len());
+
+                    //
+                    // Parse the catch-all statement.
+                    //
+                    let catchall_stmt = cases
+                        .get(catchall_index)
+                        .map(|atom| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(_, expr) = atom.as_ref() else {
+                                return Err(Error::ExpectedPair);
+                            };
+                            //
+                            // Parse the statement.
+                            //
+                            Statement::try_from(expr.clone()).map(Box::new)
+                        })
+                        .transpose()?;
+                    //
+                    // Process the cases up to the catch-all statement.
+                    //
+                    let ift = cases[0..catchall_index].into_iter().rev().try_fold(
+                        catchall_stmt,
+                        |else_, case| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(cond, expr) = case.as_ref() else {
+                                return Err(Error::ExpectedPair);
+                            };
+                            //
+                            // Parse the condition.
+                            //
+                            let stmt: Statement = cond.clone().try_into()?;
+                            //
+                            // Build the condition evaluation.
+                            //
+                            let cond = Self::Apply(
+                                stmt.into(),
+                                Statements::new(vec![value.clone()]),
+                                Location::Any,
+                            );
+                            //
+                            // Parse the expression.
+                            //
+                            let then: Statement = expr.clone().try_into()?;
+                            //
+                            // Build the case statement.
+                            //
+                            Ok(Some(Box::new(Self::IfThenElse(
+                                cond.into(),
+                                then.into(),
+                                else_,
+                            ))))
+                        },
+                    )?;
+                    //
+                    // Extract the statement.
+                    //
+                    let result = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
+                    //
+                    // Done.
+                    //
+                    Ok(result)
+                }
                 //
                 // Control flow: if.
                 //
@@ -493,8 +621,24 @@ impl Statement {
                 //
                 v => match Operator::from_str(v) {
                     Ok(v) => {
-                        let stmt = Box::new(Statement::Operator(v));
+                        //
+                        // Process the arguments.
+                        //
                         let stmts: Statements = rem.clone().try_into()?;
+                        //
+                        // If there is enough arguments, generate an operator call.
+                        //
+                        let stmt = if stmts.len() >= v.arity() {
+                            Box::new(Statement::Operator(v))
+                        }
+                        //
+                        // Otherwise, generate a symbol call.
+                        else {
+                            Box::new(Statement::Symbol(sym.clone()))
+                        };
+                        //
+                        // Done.
+                        //
                         Ok(Self::Apply(stmt, stmts, Location::Any))
                     }
                     Err(_) => {
@@ -646,7 +790,7 @@ impl TryFrom<Rc<Atom>> for Statement {
 // Statements.
 //
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct Statements(Vec<Statement>);
 

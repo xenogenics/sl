@@ -990,31 +990,34 @@ impl Compiler {
             //
             // Arithmetics.
             //
-            Self::lift(Operator::Add, 2),
-            Self::lift(Operator::Sub, 2),
-            Self::lift(Operator::Ge, 2),
-            Self::lift(Operator::Gt, 2),
-            Self::lift(Operator::Le, 2),
-            Self::lift(Operator::Lt, 2),
+            Self::lift(Operator::Add),
+            Self::lift(Operator::Sub),
+            Self::lift(Operator::Ge),
+            Self::lift(Operator::Gt),
+            Self::lift(Operator::Le),
+            Self::lift(Operator::Lt),
             //
             // Logic.
             //
-            Self::lift(Operator::And, 2),
-            Self::lift(Operator::Equ, 2),
-            Self::lift(Operator::Neq, 2),
-            Self::lift(Operator::Not, 1),
-            Self::lift(Operator::Or, 2),
+            Self::lift(Operator::And),
+            Self::lift(Operator::Equ),
+            Self::lift(Operator::Neq),
+            Self::lift(Operator::Not),
+            Self::lift(Operator::Or),
             //
             // List.
             //
-            Self::lift(Operator::Car, 1),
-            Self::lift(Operator::Cdr, 1),
-            Self::lift(Operator::Cons, 2),
+            Self::lift(Operator::Car),
+            Self::lift(Operator::Cdr),
+            Self::lift(Operator::Cons),
             //
             // Predicates.
             //
-            Self::lift(Operator::IsLst, 1),
-            Self::lift(Operator::IsNil, 1),
+            Self::lift(Operator::IsChr),
+            Self::lift(Operator::IsNum),
+            Self::lift(Operator::IsLst),
+            Self::lift(Operator::IsNil),
+            Self::lift(Operator::IsSym),
         ];
         //
         // Compile the statements.
@@ -1022,7 +1025,8 @@ impl Compiler {
         self.load_and_compile(stmts)
     }
 
-    fn lift(op: Operator, argcnt: usize) -> TopLevelStatement {
+    fn lift(op: Operator) -> TopLevelStatement {
+        let argcnt = op.arity();
         //
         // Build the argument list.
         //

@@ -816,7 +816,6 @@ mod compiler {
             .unwrap();
         let compiler = Compiler::default();
         let (_, result) = compiler.compile(atoms).unwrap();
-        println!("{:?}", result);
         assert_eq!(
             result,
             vec![
@@ -841,6 +840,283 @@ mod compiler {
                 OpCode::Psh(Immediate::Number(1)),
                 OpCode::Psh(Immediate::Funcall(0, Arity::SomeWithRem(2))),
                 OpCode::Call(4),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_operator_currying_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def incr (A)
+                    (let ((+1 . (+ 1)))
+                        (+1 A)))
+
+                (def main ()
+                    (incr 1))
+                "#,
+            )
+            .unwrap();
+        let mut compiler = Compiler::default();
+        compiler.lift_operators().unwrap();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                //
+                // +().
+                //
+                OpCode::Rot(3),
+                OpCode::Get(2),
+                OpCode::Get(2),
+                OpCode::Add,
+                OpCode::Rot(3),
+                OpCode::Pop(2),
+                OpCode::Ret,
+                //
+                // incr().
+                //
+                OpCode::Rot(2),                                     // [ret0, A]
+                OpCode::Psh(Immediate::Number(1)),                  // [ret0, A, 1]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))), // [ret0, A, 1, +()]
+                OpCode::Call(1),                                    // [ret0, A, cls0]
+                OpCode::Get(2),                                     // [ret0, A, cls0, A]
+                OpCode::Get(2),                                     // [ret0, A, cls0, A, cls0]
+                OpCode::Call(1),                                    // [ret0, A, cls0, A+1]
+                OpCode::Rot(2),                                     // [ret0, A, A+1, cls0]
+                OpCode::Pop(1),                                     // [ret0, A, A+1]
+                OpCode::Rot(2),                                     // [ret0, A+1, A]
+                OpCode::Pop(1),                                     // [ret0, A+1]
+                OpCode::Ret,                                        // [A+1]
+                //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_cond_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def check (A)
+                    (cond A
+                        (num? . 0)
+                        (lst? . 1)
+                        ((= 0) . 2)))
+
+                (def main ()
+                    (check 1))
+                "#,
+            )
+            .unwrap();
+        let mut compiler = Compiler::default();
+        compiler.lift_operators().unwrap();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                //
+                // eq.
+                //
+                OpCode::Rot(3),
+                OpCode::Get(2),
+                OpCode::Get(2),
+                OpCode::Equ,
+                OpCode::Rot(3),
+                OpCode::Pop(2),
+                OpCode::Ret,
+                //
+                // num?.
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::IsNum,
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // lst?.
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::IsLst,
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // check().
+                //
+                OpCode::Rot(2),                                      // [ret0, A]
+                OpCode::Get(1),                                      // [ret0, A, A]
+                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))),  // [ret0, A, A, num?]
+                OpCode::Call(1),                                     // [ret0, A, res1]
+                OpCode::Brn(3),                                      //
+                OpCode::Psh(Immediate::Number(0)),                   //
+                OpCode::Br(16),                                      //
+                OpCode::Get(1),                                      // [ret0, A, A]
+                OpCode::Psh(Immediate::Funcall(13, Arity::Some(1))), // [ret0, A, A, lst?]
+                OpCode::Call(1),                                     // [ret0, A, res2]
+                OpCode::Brn(3),                                      //
+                OpCode::Psh(Immediate::Number(1)),                   //
+                OpCode::Br(10),                                      //
+                OpCode::Get(1),                                      // [ret0, A, A]
+                OpCode::Psh(Immediate::Number(0)),                   // [ret0, A, A, 0]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))),  // [ret0, A, A, 0, eq]
+                OpCode::Call(1),                                     // [ret0, A, A, clo0]
+                OpCode::Call(1),                                     // [ret0, A, res3]
+                OpCode::Brn(3),                                      //
+                OpCode::Psh(Immediate::Number(2)),                   //
+                OpCode::Br(2),                                       //
+                OpCode::Psh(Immediate::Nil),                         // [ret0, A, nil]
+                OpCode::Rot(2),                                      // [ret0, resX, A]
+                OpCode::Pop(1),                                      // [ret0, resX]
+                OpCode::Ret,                                         // [resX]
+                //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(19, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_cond_with_catchall_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def check (A)
+                    (cond A
+                        (num? . 0)
+                        (lst? . 1)
+                        (_ . 2)))
+
+                (def main ()
+                    (check 1))
+                "#,
+            )
+            .unwrap();
+        let mut compiler = Compiler::default();
+        compiler.lift_operators().unwrap();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                //
+                // num?.
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::IsNum,
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // lst?.
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::IsLst,
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // check().
+                //
+                OpCode::Rot(2),                                     // [ret0, A]
+                OpCode::Get(1),                                     // [ret0, A, A]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, A, A, num?]
+                OpCode::Call(1),                                    //
+                OpCode::Brn(3),                                     // [ret0, A, res1]
+                OpCode::Psh(Immediate::Number(0)),                  //
+                OpCode::Br(8),                                      //
+                OpCode::Get(1),                                     // [ret0, A, A]
+                OpCode::Psh(Immediate::Funcall(6, Arity::Some(1))), // [ret0, A, A, lst?]
+                OpCode::Call(1),                                    //
+                OpCode::Brn(3),                                     //
+                OpCode::Psh(Immediate::Number(1)),                  //
+                OpCode::Br(2),                                      //
+                OpCode::Psh(Immediate::Number(2)),                  // [ret0, A, 2]
+                OpCode::Rot(2),                                     // [ret0, resX, A]
+                OpCode::Pop(1),                                     // [ret0, resX]
+                OpCode::Ret,                                        // [resX]
+                //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(12, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Ret
+            ]
+        );
+    }
+
+    #[test]
+    fn def_cond_with_ooo_catchall_with_main() {
+        let parser = ListsParser::new();
+        let atoms = parser
+            .parse(
+                r#"
+                (def check (A)
+                    (cond A
+                        (num? . 0)
+                        (_ . 2)
+                        (lst? . 1)))
+
+                (def main ()
+                    (check 1))
+                "#,
+            )
+            .unwrap();
+        let mut compiler = Compiler::default();
+        compiler.lift_operators().unwrap();
+        let (_, result) = compiler.compile(atoms).unwrap();
+        println!("{result:?}");
+        assert_eq!(
+            result,
+            vec![
+                //
+                // num?.
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::IsNum,
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
+                // check().
+                //
+                OpCode::Rot(2),                                     // [ret0, A]
+                OpCode::Get(1),                                     // [ret0, A, A]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, A, A, num?]
+                OpCode::Call(1),                                    //
+                OpCode::Brn(3),                                     //
+                OpCode::Psh(Immediate::Number(0)),                  //
+                OpCode::Br(2),                                      //
+                OpCode::Psh(Immediate::Number(2)),                  // [ret0, A, 2]
+                OpCode::Rot(2),                                     // [ret0, resX, A]
+                OpCode::Pop(1),                                     // [ret0, resX]
+                OpCode::Ret,                                        // [resX]
+                //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(6, Arity::Some(1))),
+                OpCode::Call(1),
                 OpCode::Ret
             ]
         );
