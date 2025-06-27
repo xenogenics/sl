@@ -30,9 +30,7 @@ impl Arguments {
         match self {
             Arguments::Capture(v) => Box::new(Some(v).into_iter()),
             Arguments::List(items) => Box::new(items.iter()),
-            Arguments::ListAndCapture(items, last) => {
-                Box::new(items.iter().chain(Some(last).into_iter()))
-            }
+            Arguments::ListAndCapture(items, last) => Box::new(items.iter().chain(Some(last))),
             Arguments::None => Box::new(None.iter()),
         }
     }
@@ -43,6 +41,14 @@ impl Arguments {
             Arguments::List(items) => items.len(),
             Arguments::ListAndCapture(items, _) => items.len() + 1,
             Arguments::None => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Arguments::Capture(_) | Arguments::ListAndCapture(..) => false,
+            Arguments::List(items) => items.is_empty(),
+            Arguments::None => true,
         }
     }
 
@@ -83,7 +89,7 @@ impl TryFrom<Rc<Atom>> for Arguments {
             Atom::Nil => Ok(Arguments::None),
             Atom::Pair(..) => Self::from_pair(value, Vec::new()),
             Atom::Symbol(v) => Ok(Arguments::Capture(v.clone())),
-            _ => return Err(Error::ExpectedPairOrSymbol),
+            _ => Err(Error::ExpectedPairOrSymbol),
         }
     }
 }
@@ -425,7 +431,7 @@ impl Statement {
                     //
                     // Process the cases up to the catch-all statement.
                     //
-                    let ift = cases[0..catchall_index].into_iter().rev().try_fold(
+                    let ift = cases[0..catchall_index].iter().rev().try_fold(
                         catchall_stmt,
                         |else_, case| {
                             //
@@ -675,7 +681,7 @@ impl Statement {
                 let iter = Some(statement.as_ref())
                     .into_iter()
                     .chain(then.statements())
-                    .chain(else_.into_iter().flat_map(|v| v.statements()));
+                    .chain(else_.iter().flat_map(|v| v.statements()));
                 Box::new(iter)
             }
             Statement::Let(bindings, statements) => {
@@ -692,10 +698,10 @@ impl Statement {
     fn identify_tail_calls(&mut self, name: &str) {
         match self {
             Statement::Apply(stmt, _, location) => {
-                if let Statement::Symbol(v) = stmt.as_ref() {
-                    if name == v.as_ref() {
-                        *location = Location::Tail;
-                    }
+                if let Statement::Symbol(v) = stmt.as_ref()
+                    && name == v.as_ref()
+                {
+                    *location = Location::Tail;
                 }
             }
             Statement::IfThenElse(_, then, else_) => {
@@ -812,6 +818,10 @@ impl Statements {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     fn identify_tail_calls(&mut self, name: &str) {

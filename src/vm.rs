@@ -42,7 +42,7 @@ impl VirtualMachine {
         //
         // Push the initial return value.
         //
-        self.stack.push(Value::Link(ops.len()).into());
+        self.stack.push(Value::Link(ops.len()));
         //
         // Interpreter loop.
         //
@@ -71,33 +71,33 @@ impl VirtualMachine {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
                     let v = Value::from(Immediate::Number(a + b));
-                    self.stack.push(v.into());
+                    self.stack.push(v);
                 }
                 OpCode::Sub => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
                     let v = Value::from(Immediate::Number(a - b));
-                    self.stack.push(v.into());
+                    self.stack.push(v);
                 }
                 OpCode::Ge => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
-                    self.stack.push(Value::from(Immediate::from(a >= b)).into());
+                    self.stack.push(Value::from(Immediate::from(a >= b)));
                 }
                 OpCode::Gt => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
-                    self.stack.push(Value::from(Immediate::from(a > b)).into());
+                    self.stack.push(Value::from(Immediate::from(a > b)));
                 }
                 OpCode::Le => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
-                    self.stack.push(Value::from(Immediate::from(a <= b)).into());
+                    self.stack.push(Value::from(Immediate::from(a <= b)));
                 }
                 OpCode::Lt => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
-                    self.stack.push(Value::from(Immediate::from(a < b)).into());
+                    self.stack.push(Value::from(Immediate::from(a < b)));
                 }
                 //
                 // Logics.
@@ -214,10 +214,7 @@ impl VirtualMachine {
                 }
                 OpCode::IsLst => {
                     let r = match self.stack.pop() {
-                        Value::Heap(value) => match value.as_ref() {
-                            heap::Value::Pair(..) => true,
-                            _ => false,
-                        },
+                        Value::Heap(value) => matches!(value.as_ref(), heap::Value::Pair(..)),
                         Value::Immediate(Immediate::Nil) => true,
                         _ => false,
                     };
@@ -262,7 +259,7 @@ impl VirtualMachine {
                                 //
                                 // Push the return link and go to the funcall address.
                                 //
-                                self.stack.push(Value::Link(pc + 1).into());
+                                self.stack.push(Value::Link(pc + 1));
                                 pc = addr as usize;
                                 continue;
                             }
@@ -279,7 +276,7 @@ impl VirtualMachine {
                                 // Push the return link and go to the funcall address.
                                 //
                                 else {
-                                    self.stack.push(Value::Link(pc + 1).into());
+                                    self.stack.push(Value::Link(pc + 1));
                                     pc = addr as usize;
                                     continue;
                                 }
@@ -317,7 +314,7 @@ impl VirtualMachine {
                                     //
                                     // Push the link value.
                                     //
-                                    self.stack.push(Value::Link(pc + 1).into());
+                                    self.stack.push(Value::Link(pc + 1));
                                     pc = addr as usize;
                                     continue;
                                 }
@@ -352,7 +349,7 @@ impl VirtualMachine {
                         //
                         // Push the return link and go to the funcall address.
                         //
-                        self.stack.push(Value::Link(pc + 1).into());
+                        self.stack.push(Value::Link(pc + 1));
                         pc = addr as usize;
                         continue;
                     }
@@ -369,7 +366,7 @@ impl VirtualMachine {
                         // Push the return link and go to the funcall address.
                         //
                         else {
-                            self.stack.push(Value::Link(pc + 1).into());
+                            self.stack.push(Value::Link(pc + 1));
                             pc = addr as usize;
                             continue;
                         }
@@ -410,7 +407,7 @@ impl VirtualMachine {
                             //
                             // Push the link value.
                             //
-                            self.stack.push(Value::Link(pc + 1).into());
+                            self.stack.push(Value::Link(pc + 1));
                             pc = addr as usize;
                             continue;
                         }
@@ -448,7 +445,7 @@ impl VirtualMachine {
                 OpCode::Lst(n) => self.stack.list(n),
                 OpCode::Pak(v) => self.stack.pack(0, v),
                 OpCode::Pop(v) => self.stack.drop(v),
-                OpCode::Psh(v) => self.stack.push(Value::from(v).into()),
+                OpCode::Psh(v) => self.stack.push(Value::from(v)),
                 OpCode::Rot(n) => self.stack.rotate(n),
                 OpCode::Rtm(m, n) => self.stack.rotate_n(m, n),
                 OpCode::Swp => self.stack.swap(),

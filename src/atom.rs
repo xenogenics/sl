@@ -128,6 +128,7 @@ impl Atom {
         AtomIterator(self.clone())
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn into_iter(self: Rc<Atom>) -> impl std::iter::Iterator<Item = Rc<Atom>> {
         AtomIterator(self)
     }

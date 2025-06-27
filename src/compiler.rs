@@ -91,6 +91,12 @@ impl From<OpCode> for LabelOrOpCode {
 type Stream = VecDeque<LabelOrOpCode>;
 
 //
+// Symbols and OpCodes.
+//
+
+pub type SymbolsAndOpCodes = (Vec<(Box<str>, usize, Arity)>, OpCodes);
+
+//
 // Compiler.
 //
 
@@ -103,10 +109,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn compile(
-        mut self,
-        atoms: Vec<Rc<Atom>>,
-    ) -> Result<(Vec<(Box<str>, usize, Arity)>, OpCodes), Error> {
+    pub fn compile(mut self, atoms: Vec<Rc<Atom>>) -> Result<SymbolsAndOpCodes, Error> {
         //
         // Rewrite the atoms using our intermediate representation.
         //
@@ -896,7 +899,7 @@ impl Compiler {
             }
             Statement::Prog(stmts) => self.compile_statements(ctxt, stmts),
             Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
-            Statement::Value(value) => self.compile_value(ctxt, value),
+            Statement::Value(value) => Self::compile_value(ctxt, value),
         }
     }
 
@@ -922,7 +925,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_value(&mut self, ctxt: &mut Context, value: &Value) -> Result<(), Error> {
+    fn compile_value(ctxt: &mut Context, value: &Value) -> Result<(), Error> {
         //
         // Get the opcode.
         //
@@ -946,8 +949,8 @@ impl Compiler {
                 //
                 // Process car and cdr.
                 //
-                self.compile_value(ctxt, cdr)?;
-                self.compile_value(ctxt, car)?;
+                Self::compile_value(ctxt, cdr)?;
+                Self::compile_value(ctxt, car)?;
                 //
                 // Push cons, consume 2 and producing 1.
                 //

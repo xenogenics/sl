@@ -1,8 +1,5 @@
 use clap::{arg, Parser};
-use sl::{
-    opcodes::{Arity, OpCode},
-    vm::VirtualMachine,
-};
+use sl::{compiler::SymbolsAndOpCodes, vm::VirtualMachine};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -38,8 +35,7 @@ fn main() -> Result<(), Error> {
     // Decode the bytecode file.
     //
     let conf = bincode::config::standard();
-    let (syms, ops): (Vec<(Box<str>, usize, Arity)>, Vec<OpCode>) =
-        bincode::decode_from_std_read(&mut file, conf)?;
+    let (syms, ops): SymbolsAndOpCodes = bincode::decode_from_std_read(&mut file, conf)?;
     //
     // Build the virtual machine.
     //
