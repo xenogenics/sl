@@ -51,11 +51,7 @@ impl Immediate {
 
 impl From<bool> for Immediate {
     fn from(value: bool) -> Self {
-        if value {
-            Self::True
-        } else {
-            Self::Nil
-        }
+        if value { Self::True } else { Self::Nil }
     }
 }
 
@@ -90,6 +86,10 @@ pub enum OpCode {
     Cdr,
     Cons,
     //
+    // String operation.
+    //
+    Str,
+    //
     // Predicates.
     //
     IsChr,
@@ -97,6 +97,7 @@ pub enum OpCode {
     IsNil,
     IsNum,
     IsSym,
+    IsTru,
     //
     // Control flow.
     //

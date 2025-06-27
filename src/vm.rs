@@ -202,6 +202,21 @@ impl VirtualMachine {
                         .push(Value::Heap(Rc::new(heap::Value::Pair(a, b))));
                 }
                 //
+                // String operation.
+                //
+                OpCode::Str => {
+                    let value = match self.stack.pop() {
+                        Value::Heap(value) => match value.as_ref() {
+                            heap::Value::Immediate(imm) => Self::immediate_to_string(*imm),
+                            heap::Value::Pair(..) => Value::Heap(value.clone()),
+                            _ => Value::Immediate(Immediate::Nil),
+                        },
+                        Value::Immediate(imm) => Self::immediate_to_string(imm),
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
+                //
                 // Predicates.
                 //
                 OpCode::IsChr => {
@@ -226,6 +241,10 @@ impl VirtualMachine {
                 }
                 OpCode::IsSym => {
                     let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Symbol(_)));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsTru => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::True));
                     self.stack.push(Value::Immediate(r.into()));
                 }
                 //
@@ -463,5 +482,67 @@ impl VirtualMachine {
         // Done.
         //
         Ok(())
+    }
+}
+
+//
+// Helpers.
+//
+
+impl VirtualMachine {
+    fn immediate_to_string(imm: Immediate) -> Value {
+        match imm {
+            Immediate::True => {
+                let e = heap::Value::Pair(
+                    Rc::new(heap::Value::Immediate(Immediate::Char('T' as u8))),
+                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
+                );
+                Value::Heap(Rc::new(e))
+            }
+            Immediate::Char(v) => {
+                let e = heap::Value::Pair(
+                    Rc::new(heap::Value::Immediate(Immediate::Char(v))),
+                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
+                );
+                Value::Heap(Rc::new(e))
+            }
+            Immediate::Number(v) => {
+                //
+                // Stringify the number.
+                //
+                let v = format!("{v}");
+                //
+                // Convert it to a string (list of chars).
+                //
+                let value = v.bytes().rev().fold(
+                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
+                    |acc, v| {
+                        let v = Rc::new(heap::Value::Immediate(Immediate::Char(v)));
+                        Rc::new(heap::Value::Pair(v, acc))
+                    },
+                );
+                //
+                // Done.
+                //
+                Value::Heap(value)
+            }
+            Immediate::Symbol(v) => {
+                //
+                // Convert it to a string (list of chars).
+                //
+                let value = v.into_iter().filter(|v| *v != 0).rev().fold(
+                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
+                    |acc, v| {
+                        let v = Rc::new(heap::Value::Immediate(Immediate::Char(v)));
+                        Rc::new(heap::Value::Pair(v, acc))
+                    },
+                );
+                //
+                // Done.
+                //
+                Value::Heap(value)
+            }
+            _ => Value::Immediate(Immediate::Nil),
+        }
     }
 }

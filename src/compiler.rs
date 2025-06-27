@@ -776,6 +776,10 @@ impl Compiler {
                     Operator::Cdr => OpCode::Cdr.into(),
                     Operator::Cons => OpCode::Cons.into(),
                     //
+                    // String.
+                    //
+                    Operator::Str => OpCode::Str.into(),
+                    //
                     // Predicates.
                     //
                     Operator::IsChr => OpCode::IsChr.into(),
@@ -783,6 +787,7 @@ impl Compiler {
                     Operator::IsLst => OpCode::IsLst.into(),
                     Operator::IsNil => OpCode::IsNil.into(),
                     Operator::IsSym => OpCode::IsSym.into(),
+                    Operator::IsTru => OpCode::IsTru.into(),
                 };
                 //
                 // Push the opcode.
@@ -1021,6 +1026,7 @@ impl Compiler {
             Self::lift(Operator::IsLst),
             Self::lift(Operator::IsNil),
             Self::lift(Operator::IsSym),
+            Self::lift(Operator::IsTru),
         ];
         //
         // Compile the statements.

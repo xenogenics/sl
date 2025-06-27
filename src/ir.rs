@@ -138,6 +138,11 @@ pub enum Operator {
     #[strum(serialize = "cons")]
     Cons,
     //
+    // String operation.
+    //
+    #[strum(serialize = "str")]
+    Str,
+    //
     // Predicates.
     //
     #[strum(serialize = "chr?")]
@@ -150,6 +155,8 @@ pub enum Operator {
     IsNil,
     #[strum(serialize = "sym?")]
     IsSym,
+    #[strum(serialize = "tru?")]
+    IsTru,
 }
 
 impl Operator {
@@ -169,11 +176,13 @@ impl Operator {
             Operator::Car => 1,
             Operator::Cdr => 1,
             Operator::Cons => 2,
+            Operator::Str => 1,
             Operator::IsChr => 1,
             Operator::IsNum => 1,
             Operator::IsLst => 1,
             Operator::IsNil => 1,
             Operator::IsSym => 1,
+            Operator::IsTru => 1,
         }
     }
 }
