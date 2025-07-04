@@ -198,6 +198,7 @@ pub enum Value {
     True,
     Char(u8),
     Number(i64),
+    Wildcard,
 }
 
 impl Display for Value {
@@ -207,6 +208,7 @@ impl Display for Value {
             Value::True => write!(f, "T"),
             Value::Char(c) => write!(f, "{}", *c as char),
             Value::Number(v) => write!(f, "{v}"),
+            Value::Wildcard => write!(f, "_"),
         }
     }
 }
@@ -221,7 +223,7 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::Char(v) => Ok(Self::Char(*v)),
             Atom::Number(v) => Ok(Self::Number(*v)),
             Atom::Pair(..) | Atom::String(_) | Atom::Symbol(_) => Err(Error::ExpectedValue),
-            Atom::Wildcard => todo!(),
+            Atom::Wildcard => Ok(Self::Wildcard),
         }
     }
 }
@@ -382,6 +384,46 @@ impl Statement {
                 //
                 "unquote" => Err(Error::UnquoteOutsideQuote),
                 //
+                // Control flow: if.
+                //
+                "if" => {
+                    //
+                    // Unpack the condition.
+                    //
+                    let Atom::Pair(cond, args) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse the condition.
+                    //
+                    let cond: Statement = cond.clone().try_into()?;
+                    //
+                    // Unpack THEN.
+                    //
+                    let Atom::Pair(then, args) = args.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse THEN.
+                    //
+                    let then: Statement = then.clone().try_into()?;
+                    //
+                    // Unpack ELSE.
+                    //
+                    let else_ = match args.as_ref() {
+                        Atom::Nil => None,
+                        Atom::Pair(else_, _) => {
+                            let v = Statement::try_from(else_.clone())?;
+                            Some(Box::new(v))
+                        }
+                        _ => return Err(Error::ExpectedPair),
+                    };
+                    //
+                    // Done.
+                    //
+                    Ok(Self::IfThenElse(cond.into(), then.into(), else_))
+                }
+                //
                 // Control flow: cond.
                 //
                 "cond" => {
@@ -437,6 +479,10 @@ impl Statement {
                         })
                         .transpose()?;
                     //
+                    // Build the value symbol.
+                    //
+                    let vsym = Statement::Symbol("#COND#".into());
+                    //
                     // Process the cases up to the catch-all statement.
                     //
                     let ift = cases[0..catchall_index].iter().rev().try_fold(
@@ -457,7 +503,7 @@ impl Statement {
                             //
                             let cond = Self::Apply(
                                 stmt.into(),
-                                Statements::new(vec![value.clone()]),
+                                Statements::new(vec![vsym.clone()]),
                                 Location::Any,
                             );
                             //
@@ -477,51 +523,16 @@ impl Statement {
                     //
                     // Extract the statement.
                     //
-                    let result = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
+                    let stmt = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
+                    //
+                    // Wrap into a let binding.
+                    //
+                    let bindings = vec![("#COND#".into(), value)];
+                    let result = Statement::Let(bindings, Statements::new(vec![stmt]));
                     //
                     // Done.
                     //
                     Ok(result)
-                }
-                //
-                // Control flow: if.
-                //
-                "if" => {
-                    //
-                    // Unpack the condition.
-                    //
-                    let Atom::Pair(cond, args) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse the condition.
-                    //
-                    let cond: Statement = cond.clone().try_into()?;
-                    //
-                    // Unpack THEN.
-                    //
-                    let Atom::Pair(then, args) = args.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse THEN.
-                    //
-                    let then: Statement = then.clone().try_into()?;
-                    //
-                    // Unpack ELSE.
-                    //
-                    let else_ = match args.as_ref() {
-                        Atom::Nil => None,
-                        Atom::Pair(else_, _) => {
-                            let v = Statement::try_from(else_.clone())?;
-                            Some(Box::new(v))
-                        }
-                        _ => return Err(Error::ExpectedPair),
-                    };
-                    //
-                    // Done.
-                    //
-                    Ok(Self::IfThenElse(cond.into(), then.into(), else_))
                 }
                 //
                 // Control flow: unless.

@@ -1096,36 +1096,39 @@ mod compiler {
                 //
                 OpCode::Rot(2),                                      // [ret0, A]
                 OpCode::Get(1),                                      // [ret0, A, A]
+                OpCode::Get(1),                                      // [ret0, A, A, A]
                 OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))),  // [ret0, A, A, num?]
-                OpCode::Call(1),                                     // [ret0, A, res1]
+                OpCode::Call(1),                                     // [ret0, A, A, res1]
                 OpCode::Brn(3),                                      //
                 OpCode::Psh(Immediate::Number(0)),                   //
                 OpCode::Br(16),                                      //
-                OpCode::Get(1),                                      // [ret0, A, A]
-                OpCode::Psh(Immediate::Funcall(13, Arity::Some(1))), // [ret0, A, A, lst?]
-                OpCode::Call(1),                                     // [ret0, A, res2]
+                OpCode::Get(1),                                      // [ret0, A, A, A]
+                OpCode::Psh(Immediate::Funcall(13, Arity::Some(1))), // [ret0, A, A, A, lst?]
+                OpCode::Call(1),                                     // [ret0, A, A, res2]
                 OpCode::Brn(3),                                      //
                 OpCode::Psh(Immediate::Number(1)),                   //
                 OpCode::Br(10),                                      //
-                OpCode::Get(1),                                      // [ret0, A, A]
-                OpCode::Psh(Immediate::Number(0)),                   // [ret0, A, A, 0]
-                OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))),  // [ret0, A, A, 0, eq]
-                OpCode::Call(1),                                     // [ret0, A, A, clo0]
-                OpCode::Call(1),                                     // [ret0, A, res3]
+                OpCode::Get(1),                                      // [ret0, A, A, A]
+                OpCode::Psh(Immediate::Number(0)),                   // [ret0, A, A, A, 0]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))),  // [ret0, A, A, A, eq]
+                OpCode::Call(1),                                     // [res0, A, A, A, clos0]
+                OpCode::Call(1),                                     // [res0, A, A, res3]
                 OpCode::Brn(3),                                      //
                 OpCode::Psh(Immediate::Number(2)),                   //
                 OpCode::Br(2),                                       //
-                OpCode::Psh(Immediate::Nil),                         // [ret0, A, nil]
-                OpCode::Rot(2),                                      // [ret0, resX, A]
-                OpCode::Pop(1),                                      // [ret0, resX]
-                OpCode::Ret,                                         // [resX]
+                OpCode::Psh(Immediate::Nil),                         //
+                OpCode::Rot(2),                                      // [ret0, A, res3, A]
+                OpCode::Pop(1),                                      // [ret0, A, res3]
+                OpCode::Rot(2),                                      // [ret0, res3, A]
+                OpCode::Pop(1),                                      // [ret0, res3]
+                OpCode::Ret,                                         // [res3]
                 //
                 // main().
                 //
                 OpCode::Psh(Immediate::Number(1)),
                 OpCode::Psh(Immediate::Funcall(19, Arity::Some(1))),
                 OpCode::Call(1),
-                OpCode::Ret
+                OpCode::Ret,
             ]
         );
     }
