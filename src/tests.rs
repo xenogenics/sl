@@ -252,6 +252,31 @@ mod compiler {
     }
 
     #[test]
+    fn unless() {
+        let parser = ListsParser::new();
+        let atom = parser.parse("(unless (< 3 0) (+ 1 2))").unwrap().remove(0);
+        let stmt: Statement = atom.try_into().unwrap();
+        let mut context = Context::default();
+        let mut compiler = Compiler::default();
+        compiler.compile_statement(&mut context, &stmt).unwrap();
+        assert_eq!(
+            context.stream(),
+            &[
+                OpCode::Psh(Immediate::Number(0)).into(),
+                OpCode::Psh(Immediate::Number(3)).into(),
+                OpCode::Lt.into(),
+                OpCode::Not.into(),
+                LabelOrOpCode::BranchIfNot("BEGIN_ELSE_0000".to_owned().into_boxed_str()),
+                OpCode::Psh(Immediate::Number(2)).into(),
+                OpCode::Psh(Immediate::Number(1)).into(),
+                OpCode::Add.into(),
+                LabelOrOpCode::Branch("END_ELSE_0001".to_owned().into_boxed_str()),
+                OpCode::Psh(Immediate::Nil).into(),
+            ]
+        );
+    }
+
+    #[test]
     fn let_binding_with_a_single_constant() {
         let parser = ListsParser::new();
         let atom = parser.parse("(let ((a . 1)) (+ a 1))").unwrap().remove(0);

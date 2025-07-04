@@ -525,6 +525,43 @@ impl Statement {
                     Ok(Self::IfThenElse(cond.into(), then.into(), else_))
                 }
                 //
+                // Control flow: unless.
+                //
+                "unless" => {
+                    //
+                    // Unpack the condition.
+                    //
+                    let Atom::Pair(cond, args) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse the condition.
+                    //
+                    let cond: Statement = cond.clone().try_into()?;
+                    //
+                    // Invert the condition.
+                    //
+                    let cond = Statement::Apply(
+                        Statement::Operator(Operator::Not).into(),
+                        Statements::new(vec![cond]),
+                        Location::Any,
+                    );
+                    //
+                    // Unpack statement.
+                    //
+                    let Atom::Pair(stmt, _) = args.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse the statement.
+                    //
+                    let stmt: Statement = stmt.clone().try_into()?;
+                    //
+                    // Done.
+                    //
+                    Ok(Self::IfThenElse(cond.into(), stmt.into(), None))
+                }
+                //
                 // Value binding: let.
                 //
                 "let" => {
