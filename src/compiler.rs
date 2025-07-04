@@ -279,21 +279,12 @@ impl Compiler {
 impl Compiler {
     fn load_modules(&mut self, stmts: &Statements) -> Result<(), Error> {
         stmts.iter().try_for_each(|v| {
-            //
-            // Make sure the statement is a value.
-            //
-            let Statement::Value(v) = v else {
-                return Err(Error::ExpectedValue);
-            };
-            //
-            // Check the value.
-            //
             match v {
-                Value::Pair(car, cdr) => {
+                Statement::Pair(car, cdr) => {
                     //
                     // Get the name of the module.
                     //
-                    let Value::Symbol(name) = car.as_ref() else {
+                    let Statement::Symbol(name) = car.as_ref() else {
                         return Err(Error::ExpectedSymbol);
                     };
                     //
@@ -302,13 +293,13 @@ impl Compiler {
                     let items: Vec<_> = cdr
                         .iter()
                         .map(|v| match v {
-                            Value::Symbol(v) => Ok(v.as_ref()),
+                            Statement::Symbol(v) => Ok(v.as_ref()),
                             _ => Err(Error::ExpectedSymbol),
                         })
                         .collect::<Result<_, _>>()?;
                     self.load_module(name, Some(&items))
                 }
-                Value::Symbol(v) => self.load_module(v, None),
+                Statement::Symbol(v) => self.load_module(v, None),
                 _ => Err(Error::ExpectedPairOrSymbol),
             }
         })
@@ -903,6 +894,29 @@ impl Compiler {
                 Ok(())
             }
             Statement::Prog(stmts) => self.compile_statements(ctxt, stmts),
+            Statement::Pair(car, cdr) => {
+                //
+                // Process car and cdr.
+                //
+                self.compile_statement(ctxt, car.as_ref())?;
+                self.compile_statement(ctxt, cdr.as_ref())?;
+                //
+                // Push cons, consume 2 and producing 1.
+                //
+                let opcode = OpCode::Cons.into();
+                //
+                // Push the opcode.
+                //
+                ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn -= 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
             Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
             Statement::Value(value) => Self::compile_value(ctxt, value),
         }
@@ -935,40 +949,10 @@ impl Compiler {
         // Get the opcode.
         //
         let opcode = match value {
-            //
-            // Idempotent values.
-            //
             Value::Nil => OpCode::Psh(Immediate::Nil).into(),
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
-            //
-            // Only generated as a result of (quote).
-            //
-            Value::Symbol(v) => {
-                let mut symbol = [0_u8; 15];
-                symbol[..v.len()].copy_from_slice(v.as_bytes());
-                OpCode::Psh(Immediate::Symbol(symbol)).into()
-            }
-            Value::Pair(car, cdr) => {
-                //
-                // Process car and cdr.
-                //
-                Self::compile_value(ctxt, cdr)?;
-                Self::compile_value(ctxt, car)?;
-                //
-                // Push cons, consume 2 and producing 1.
-                //
-                let opcode = OpCode::Cons.into();
-                //
-                // Update the stack.
-                //
-                ctxt.stackn -= 2;
-                //
-                // Done.
-                //
-                opcode
-            }
         };
         //
         // Push the opcode.

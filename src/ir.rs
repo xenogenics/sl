@@ -198,14 +198,6 @@ pub enum Value {
     True,
     Char(u8),
     Number(i64),
-    Pair(Box<Value>, Box<Value>),
-    Symbol(Box<str>),
-}
-
-impl Value {
-    pub fn iter(&self) -> ValueIterator<'_> {
-        ValueIterator(self)
-    }
 }
 
 impl Display for Value {
@@ -215,8 +207,6 @@ impl Display for Value {
             Value::True => write!(f, "T"),
             Value::Char(c) => write!(f, "{}", *c as char),
             Value::Number(v) => write!(f, "{v}"),
-            Value::Pair(..) => write!(f, "[..]"),
-            Value::Symbol(v) => write!(f, "{v}"),
         }
     }
 }
@@ -230,38 +220,8 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::True => Ok(Self::True),
             Atom::Char(v) => Ok(Self::Char(*v)),
             Atom::Number(v) => Ok(Self::Number(*v)),
-            Atom::Pair(car, cdr) => {
-                let car: Value = car.clone().try_into()?;
-                let cdr: Value = cdr.clone().try_into()?;
-                Ok(Self::Pair(car.into(), cdr.into()))
-            }
-            Atom::String(v) => Ok(v.chars().rev().fold(Value::Nil, |mut acc, v| {
-                acc = Value::Pair(Value::Char(v as u8).into(), acc.into());
-                acc
-            })),
-            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            Atom::Pair(..) | Atom::String(_) | Atom::Symbol(_) => Err(Error::ExpectedValue),
             Atom::Wildcard => todo!(),
-        }
-    }
-}
-
-//
-// Value iterator.
-//
-
-pub struct ValueIterator<'a>(&'a Value);
-
-impl<'a> std::iter::Iterator for ValueIterator<'a> {
-    type Item = &'a Value;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.0 {
-            Value::Pair(car, cdr) => {
-                let result = car;
-                self.0 = cdr;
-                Some(result)
-            }
-            _ => None,
         }
     }
 }
@@ -296,8 +256,9 @@ pub enum Statement {
     Let(Vec<(Box<str>, Statement)>, Statements),
     Prog(Statements),
     //
-    // Symbol and value.
+    // Pair, symbol and value.
     //
+    Pair(Box<Statement>, Box<Statement>),
     Symbol(Box<str>),
     Value(Value),
 }
@@ -369,6 +330,40 @@ impl Statement {
         }
     }
 
+    fn from_maybe_unquote(atom: Rc<Atom>) -> Result<Self, Error> {
+        match atom.as_ref() {
+            Atom::Pair(car, cdr) => {
+                if let Atom::Symbol(v) = car.as_ref()
+                    && v.as_ref() == "unquote"
+                {
+                    Statement::try_from(cdr.clone())
+                } else {
+                    Self::from_quote(atom)
+                }
+            }
+            _ => Self::from_quote(atom),
+        }
+    }
+
+    fn from_quote(atom: Rc<Atom>) -> Result<Self, Error> {
+        match atom.as_ref() {
+            Atom::Pair(car, cdr) => {
+                let car = Self::from_maybe_unquote(car.clone())?;
+                let cdr = Self::from_quote(cdr.clone())?;
+                Ok(Self::Pair(car.into(), cdr.into()))
+            }
+            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
+                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
+                acc
+            })),
+            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            _ => {
+                let value: Value = atom.try_into()?;
+                Ok(Self::Value(value))
+            }
+        }
+    }
+
     fn from_pair(atom: Rc<Atom>, rem: Rc<Atom>) -> Result<Self, Error> {
         //
         // Process the atom.
@@ -381,7 +376,11 @@ impl Statement {
                 //
                 // Quote.
                 //
-                "quote" => Value::try_from(rem).map(Statement::Value),
+                "quote" => Self::from_quote(rem),
+                //
+                // Unquote.
+                //
+                "unquote" => Err(Error::UnquoteOutsideQuote),
                 //
                 // Control flow: cond.
                 //
@@ -741,6 +740,10 @@ impl Statement {
         }
     }
 
+    pub fn iter(&self) -> StatementIterator {
+        StatementIterator(self)
+    }
+
     fn identify_tail_calls(&mut self, name: &str) {
         match self {
             Statement::Apply(stmt, _, location) => {
@@ -820,6 +823,7 @@ impl Display for Statement {
                 write!(f, ")")
             }
             Statement::Prog(stmts) => write!(f, "(prog {stmts})"),
+            Statement::Pair(..) => write!(f, "(..)"),
             Statement::Symbol(symbol) => write!(f, "{symbol}"),
             Statement::Value(value) => write!(f, "{value}"),
         }
@@ -834,6 +838,27 @@ impl TryFrom<Rc<Atom>> for Statement {
             Atom::Pair(atom, rem) => Self::from_pair(atom.clone(), rem.clone()),
             Atom::Symbol(sym) => Ok(Self::Symbol(sym.clone())),
             _ => Value::try_from(atom).map(Self::Value),
+        }
+    }
+}
+
+//
+// Statement iterator.
+//
+
+pub struct StatementIterator<'a>(&'a Statement);
+
+impl<'a> std::iter::Iterator for StatementIterator<'a> {
+    type Item = &'a Statement;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            Statement::Pair(car, cdr) => {
+                let result = car;
+                self.0 = cdr;
+                Some(result)
+            }
+            _ => None,
         }
     }
 }

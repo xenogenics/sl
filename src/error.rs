@@ -42,6 +42,8 @@ pub enum Error {
     MainNotDefined,
     #[error("Parse error: {0}")]
     Parse(String),
+    #[error("Unquote outside quote context")]
+    UnquoteOutsideQuote,
     #[error("Unresolved symbol: {0}")]
     UnresolvedSymbol(Box<str>),
 }

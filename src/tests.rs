@@ -122,6 +122,7 @@ mod ir {
 mod compiler {
     use crate::{
         compiler::{Compiler, Context, LabelOrOpCode},
+        error::Error,
         grammar::ListsParser,
         ir::Statement,
         opcodes::{Arity, Immediate, OpCode},
@@ -396,6 +397,118 @@ mod compiler {
                 OpCode::Pak(1).into()
             ]
         )
+    }
+
+    #[test]
+    fn quote() {
+        let parser = ListsParser::new();
+        let atom = parser.parse("(car '(1 2 3))").unwrap().remove(0);
+        let stmt: Statement = atom.try_into().unwrap();
+        let mut context = Context::default();
+        let mut compiler = Compiler::default();
+        compiler.compile_statement(&mut context, &stmt).unwrap();
+        assert_eq!(
+            context.stream(),
+            &[
+                OpCode::Psh(Immediate::Number(1)).into(),
+                OpCode::Psh(Immediate::Number(2)).into(),
+                OpCode::Psh(Immediate::Number(3)).into(),
+                OpCode::Psh(Immediate::Nil).into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Car.into()
+            ]
+        );
+    }
+
+    #[test]
+    fn quote_with_unquoted_list() {
+        let parser = ListsParser::new();
+        let atom = parser.parse("(car '(1 ,(+ 1 2) 3))").unwrap().remove(0);
+        let stmt: Statement = atom.try_into().unwrap();
+        let mut context = Context::default();
+        let mut compiler = Compiler::default();
+        compiler.compile_statement(&mut context, &stmt).unwrap();
+        assert_eq!(
+            context.stream(),
+            &[
+                OpCode::Psh(Immediate::Number(1)).into(),
+                OpCode::Psh(Immediate::Number(2)).into(),
+                OpCode::Psh(Immediate::Number(1)).into(),
+                OpCode::Add.into(),
+                OpCode::Psh(Immediate::Number(3)).into(),
+                OpCode::Psh(Immediate::Nil).into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Car.into()
+            ]
+        );
+    }
+
+    #[test]
+    fn quote_with_unquoted_symbol() {
+        let parser = ListsParser::new();
+        let atom = parser.parse("(car '(1 ,V 3))").unwrap().remove(0);
+        let stmt: Statement = atom.try_into().unwrap();
+        let mut context = Context::default();
+        let mut compiler = Compiler::default();
+        compiler.compile_statement(&mut context, &stmt).unwrap();
+        assert_eq!(
+            context.stream(),
+            &[
+                OpCode::Psh(Immediate::Number(1)).into(),
+                LabelOrOpCode::Get("V".into()),
+                OpCode::Psh(Immediate::Number(3)).into(),
+                OpCode::Psh(Immediate::Nil).into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Car.into()
+            ]
+        );
+    }
+
+    #[test]
+    fn quote_with_double_unquote() {
+        let parser = ListsParser::new();
+        let atom = parser.parse("(car '(1 ,(,V) 3))").unwrap().remove(0);
+        let res: Result<Statement, Error> = atom.try_into();
+        assert!(matches!(res, Err(Error::UnquoteOutsideQuote)));
+    }
+
+    #[test]
+    fn nested_quote_unquote() {
+        let parser = ListsParser::new();
+        let atom = parser
+            .parse("(car '(1 ,(car '(1 ,V 2)) 3))")
+            .unwrap()
+            .remove(0);
+        let stmt: Statement = atom.try_into().unwrap();
+        let mut context = Context::default();
+        let mut compiler = Compiler::default();
+        compiler.compile_statement(&mut context, &stmt).unwrap();
+        assert_eq!(
+            context.stream(),
+            &[
+                OpCode::Psh(Immediate::Number(1)).into(),
+                OpCode::Psh(Immediate::Number(1)).into(),
+                LabelOrOpCode::Get("V".into()),
+                OpCode::Psh(Immediate::Number(2)).into(),
+                OpCode::Psh(Immediate::Nil).into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Car.into(),
+                OpCode::Psh(Immediate::Number(3)).into(),
+                OpCode::Psh(Immediate::Nil).into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Cons.into(),
+                OpCode::Car.into()
+            ]
+        );
     }
 
     #[test]

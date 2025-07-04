@@ -5,7 +5,7 @@ use crate::atom::Atom;
 grammar;
 
 match {
-	"(", ")", ".", "'",
+	"(", ")", ".", "'", ",",
 	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
@@ -15,7 +15,7 @@ match {
 	r"\s*" => {},
 	r";[^\n]*" => {},
 } else {
-	r"([a-zA-Z]|[!@$%&*_+\-={}\[\]:#|\\<>?,/])([a-zA-Z0-9]|[!@$%&*_+\-={}\[\]:;|\\<>?,/]){0,14}" => Symbol,
+	r"([a-zA-Z]|[!@$%&*_+\-={}\[\]:#|\\<>?/])([a-zA-Z0-9]|[!@$%&*_+\-={}\[\]:;|\\<>?,/]){0,14}" => Symbol,
 }
 
 pub Lists: Vec<Rc<Atom>> = {
@@ -40,6 +40,8 @@ Items: Rc<Atom> = {
 ListOrTerminal: Rc<Atom> = {
 	"'" <e:List>     => Atom::cons(Atom::symbol("quote"), e),
 	"'" <e:Terminal> => Atom::cons(Atom::symbol("quote"), e),
+	"," <e:List>     => Atom::cons(Atom::symbol("unquote"), e),
+	"," <e:Terminal> => Atom::cons(Atom::symbol("unquote"), e),
 	<e:List>         => e,
 	<e:Terminal>     => e,
 }
