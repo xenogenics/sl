@@ -198,6 +198,7 @@ pub enum Value {
     True,
     Char(u8),
     Number(i64),
+    Symbol(Box<str>),
     Wildcard,
 }
 
@@ -208,6 +209,7 @@ impl Display for Value {
             Value::True => write!(f, "T"),
             Value::Char(c) => write!(f, "{}", *c as char),
             Value::Number(v) => write!(f, "{v}"),
+            Value::Symbol(v) => write!(f, "{v}"),
             Value::Wildcard => write!(f, "_"),
         }
     }
@@ -222,7 +224,8 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::True => Ok(Self::True),
             Atom::Char(v) => Ok(Self::Char(*v)),
             Atom::Number(v) => Ok(Self::Number(*v)),
-            Atom::Pair(..) | Atom::String(_) | Atom::Symbol(_) => Err(Error::ExpectedValue),
+            Atom::Pair(..) | Atom::String(_) => Err(Error::ExpectedValue),
+            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             Atom::Wildcard => Ok(Self::Wildcard),
         }
     }
@@ -358,7 +361,6 @@ impl Statement {
                 acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
                 acc
             })),
-            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             _ => {
                 let value: Value = atom.try_into()?;
                 Ok(Self::Value(value))
@@ -528,6 +530,117 @@ impl Statement {
                     // Wrap into a let binding.
                     //
                     let bindings = vec![("#COND#".into(), value)];
+                    let result = Statement::Let(bindings, Statements::new(vec![stmt]));
+                    //
+                    // Done.
+                    //
+                    Ok(result)
+                }
+                //
+                // Control flow: match.
+                //
+                "match" => {
+                    //
+                    // Unpack the value expression.
+                    //
+                    let Atom::Pair(value, cases) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair);
+                    };
+                    //
+                    // Parse the value.
+                    //
+                    let value: Statement = value.clone().try_into()?;
+                    //
+                    // Expand the cases into a reversable collection.
+                    //
+                    let cases: Vec<_> = cases.iter().collect();
+                    //
+                    // Find the index of the catch-all statement, if any.
+                    //
+                    let catchall_index = cases
+                        .iter()
+                        .position(|e| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(cond, _) = e.as_ref() else {
+                                return false;
+                            };
+                            //
+                            // Check the condition.
+                            //
+                            matches!(cond.as_ref(), &Atom::Wildcard)
+                        })
+                        .unwrap_or(cases.len());
+
+                    //
+                    // Parse the catch-all statement.
+                    //
+                    let catchall_stmt = cases
+                        .get(catchall_index)
+                        .map(|atom| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(_, expr) = atom.as_ref() else {
+                                return Err(Error::ExpectedPair);
+                            };
+                            //
+                            // Parse the statement.
+                            //
+                            Statement::try_from(expr.clone()).map(Box::new)
+                        })
+                        .transpose()?;
+                    //
+                    // Build the value symbol.
+                    //
+                    let vsym = Statement::Symbol("#MATCH#".into());
+                    //
+                    // Process the cases up to the catch-all statement.
+                    //
+                    let ift = cases[0..catchall_index].iter().rev().try_fold(
+                        catchall_stmt,
+                        |else_, case| {
+                            //
+                            // Split the atom.
+                            //
+                            let Atom::Pair(tmpl, expr) = case.as_ref() else {
+                                return Err(Error::ExpectedPair);
+                            };
+                            //
+                            // Parse the template.
+                            //
+                            let tmpl = Self::from_quote(tmpl.clone())?;
+                            //
+                            // Build the condition evaluation.
+                            //
+                            let cond = Self::Apply(
+                                Statement::Operator(Operator::Equ).into(),
+                                Statements::new(vec![tmpl, vsym.clone()]),
+                                Location::Any,
+                            );
+                            //
+                            // Parse the expression.
+                            //
+                            let then: Statement = expr.clone().try_into()?;
+                            //
+                            // Build the case statement.
+                            //
+                            Ok(Some(Box::new(Self::IfThenElse(
+                                cond.into(),
+                                then.into(),
+                                else_,
+                            ))))
+                        },
+                    )?;
+                    //
+                    // Extract the statement.
+                    //
+                    let stmt = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
+                    //
+                    // Wrap into a let binding.
+                    //
+                    let bindings = vec![("#MATCH#".into(), value)];
                     let result = Statement::Let(bindings, Statements::new(vec![stmt]));
                     //
                     // Done.

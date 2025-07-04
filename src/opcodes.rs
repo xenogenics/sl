@@ -27,6 +27,7 @@ pub enum Immediate {
     Funcall(u32, Arity),
     Syscall(u32, u32),
     Symbol([u8; 15]),
+    Wildcard,
 }
 
 impl Immediate {

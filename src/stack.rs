@@ -22,7 +22,7 @@ impl Closure {
 // Value.
 //
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq)]
 pub enum Value {
     Closure(Closure),
     Heap(Rc<heap::Value>),
@@ -49,6 +49,20 @@ impl Value {
 impl From<Immediate> for Value {
     fn from(value: Immediate) -> Self {
         Self::Immediate(value)
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Closure(a), Value::Closure(b)) => a == b,
+            (Value::Heap(a), Value::Heap(b)) => a == b,
+            (Value::Immediate(a), Value::Immediate(b)) => a == b,
+            (Value::Link(a), Value::Link(b)) => a == b,
+            (Value::Immediate(Immediate::Wildcard), _) => true,
+            (_, Value::Immediate(Immediate::Wildcard)) => true,
+            (_, _) => false,
+        }
     }
 }
 

@@ -898,8 +898,8 @@ impl Compiler {
                 //
                 // Process car and cdr.
                 //
-                self.compile_statement(ctxt, car.as_ref())?;
                 self.compile_statement(ctxt, cdr.as_ref())?;
+                self.compile_statement(ctxt, car.as_ref())?;
                 //
                 // Push cons, consume 2 and producing 1.
                 //
@@ -953,6 +953,12 @@ impl Compiler {
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
+            Value::Symbol(v) => {
+                let mut symbol = [0_u8; 15];
+                symbol[..v.len()].copy_from_slice(v.as_bytes());
+                OpCode::Psh(Immediate::Symbol(symbol)).into()
+            }
+            Value::Wildcard => OpCode::Psh(Immediate::Wildcard).into(),
         };
         //
         // Push the opcode.
