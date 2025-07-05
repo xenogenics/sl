@@ -335,26 +335,11 @@ impl Statement {
         }
     }
 
-    fn from_maybe_unquote(atom: Rc<Atom>) -> Result<Self, Error> {
-        match atom.as_ref() {
-            Atom::Pair(car, cdr) => {
-                if let Atom::Symbol(v) = car.as_ref()
-                    && v.as_ref() == "unquote"
-                {
-                    Statement::try_from(cdr.clone())
-                } else {
-                    Self::from_quote(atom)
-                }
-            }
-            _ => Self::from_quote(atom),
-        }
-    }
-
-    fn from_quote(atom: Rc<Atom>) -> Result<Self, Error> {
+    fn from_backquote(atom: Rc<Atom>) -> Result<Self, Error> {
         match atom.as_ref() {
             Atom::Pair(car, cdr) => {
                 let car = Self::from_maybe_unquote(car.clone())?;
-                let cdr = Self::from_quote(cdr.clone())?;
+                let cdr = Self::from_backquote(cdr.clone())?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
             Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
@@ -368,6 +353,32 @@ impl Statement {
         }
     }
 
+    fn from_quote(atom: Rc<Atom>) -> Result<Self, Error> {
+        match atom.as_ref() {
+            Atom::Pair(car, cdr) => {
+                let car = Self::from_quote(car.clone())?;
+                let cdr = Self::from_quote(cdr.clone())?;
+                Ok(Self::Pair(car.into(), cdr.into()))
+            }
+            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
+                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
+                acc
+            })),
+            _ => Ok(Self::Value(atom.try_into()?)),
+        }
+    }
+
+    fn from_maybe_unquote(atom: Rc<Atom>) -> Result<Self, Error> {
+        if let Atom::Pair(car, cdr) = atom.as_ref()
+            && let Atom::Symbol(v) = car.as_ref()
+            && v.as_ref() == "unquote"
+        {
+            Statement::try_from(cdr.clone())
+        } else {
+            Self::from_backquote(atom)
+        }
+    }
+
     fn from_pair(atom: Rc<Atom>, rem: Rc<Atom>) -> Result<Self, Error> {
         //
         // Process the atom.
@@ -378,13 +389,17 @@ impl Statement {
             //
             Atom::Symbol(sym) => match sym.as_ref() {
                 //
-                // Quote.
+                // Quote: quasiquote.
+                //
+                "backquote" => Self::from_backquote(rem),
+                //
+                // Quote: quote.
                 //
                 "quote" => Self::from_quote(rem),
                 //
-                // Unquote.
+                // Quote: unquote.
                 //
-                "unquote" => Err(Error::UnquoteOutsideQuote),
+                "unquote" => Err(Error::UnquoteOutsideBackquote),
                 //
                 // Control flow: if.
                 //

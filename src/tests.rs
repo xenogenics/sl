@@ -423,9 +423,9 @@ mod compiler {
     }
 
     #[test]
-    fn quote_with_unquoted_list() {
+    fn backquote_with_unquoted_list() {
         let parser = ListsParser::new();
-        let atom = parser.parse("(car '(1 ,(+ 1 2) 3))").unwrap().remove(0);
+        let atom = parser.parse("(car `(1 ,(+ 1 2) 3))").unwrap().remove(0);
         let stmt: Statement = atom.try_into().unwrap();
         let mut context = Context::default();
         let mut compiler = Compiler::default();
@@ -448,9 +448,9 @@ mod compiler {
     }
 
     #[test]
-    fn quote_with_unquoted_symbol() {
+    fn backquote_with_unquoted_symbol() {
         let parser = ListsParser::new();
-        let atom = parser.parse("(car '(1 ,V 3))").unwrap().remove(0);
+        let atom = parser.parse("(car `(1 ,V 3))").unwrap().remove(0);
         let stmt: Statement = atom.try_into().unwrap();
         let mut context = Context::default();
         let mut compiler = Compiler::default();
@@ -473,16 +473,16 @@ mod compiler {
     #[test]
     fn quote_with_double_unquote() {
         let parser = ListsParser::new();
-        let atom = parser.parse("(car '(1 ,(,V) 3))").unwrap().remove(0);
+        let atom = parser.parse("(car `(1 ,(,V) 3))").unwrap().remove(0);
         let res: Result<Statement, Error> = atom.try_into();
-        assert!(matches!(res, Err(Error::UnquoteOutsideQuote)));
+        assert!(matches!(res, Err(Error::UnquoteOutsideBackquote)));
     }
 
     #[test]
-    fn nested_quote_unquote() {
+    fn nested_backquote_unquote() {
         let parser = ListsParser::new();
         let atom = parser
-            .parse("(car '(1 ,(car '(1 ,V 2)) 3))")
+            .parse("(car `(1 ,(car `(1 ,V 2)) 3))")
             .unwrap()
             .remove(0);
         let stmt: Statement = atom.try_into().unwrap();

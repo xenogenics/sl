@@ -5,7 +5,7 @@ use crate::atom::Atom;
 grammar;
 
 match {
-	"(", ")", ".", "'", ",",
+	"(", ")", ".", "`", "'", ",",
 	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
@@ -38,6 +38,8 @@ Items: Rc<Atom> = {
 }
 
 ListOrTerminal: Rc<Atom> = {
+	"`" <e:List>     => Atom::cons(Atom::symbol("backquote"), e),
+	"`" <e:Terminal> => Atom::cons(Atom::symbol("backquote"), e),
 	"'" <e:List>     => Atom::cons(Atom::symbol("quote"), e),
 	"'" <e:Terminal> => Atom::cons(Atom::symbol("quote"), e),
 	"," <e:List>     => Atom::cons(Atom::symbol("unquote"), e),
