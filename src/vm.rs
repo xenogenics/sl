@@ -490,7 +490,7 @@ impl VirtualMachine {
         match imm {
             Immediate::True => {
                 let e = heap::Value::Pair(
-                    Rc::new(heap::Value::Immediate(Immediate::Char('T' as u8))),
+                    Rc::new(heap::Value::Immediate(Immediate::Char(b'T'))),
                     Rc::new(heap::Value::Immediate(Immediate::Nil)),
                 );
                 Value::Heap(Rc::new(e))

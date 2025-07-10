@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     grammar::ListsParser,
     ir::{
-        Arguments, FunctionDefinition, Location, Operator, Statement, Statements,
+        Arguments, Backquote, FunctionDefinition, Location, Operator, Quote, Statement, Statements,
         TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
@@ -326,12 +326,23 @@ impl Compiler {
 impl Compiler {
     fn load_modules(&mut self, stmts: Statements) -> Result<(), Error> {
         stmts.iter().try_for_each(|v| {
-            match v {
-                Statement::Pair(car, cdr) => {
+            //
+            // Grab the quote.
+            //
+            let Statement::Quote(quote) = v else {
+                return Err(Error::ExpectedQuote);
+            };
+            //
+            // Process the quote.
+            //
+            match quote {
+                Quote::Pair(car, cdr) => {
+                    //
+                    // Split the quote
                     //
                     // Get the name of the module.
                     //
-                    let Statement::Value(Value::Symbol(name)) = car.as_ref() else {
+                    let Quote::Symbol(name) = car.as_ref() else {
                         return Err(Error::ExpectedSymbol);
                     };
                     //
@@ -340,13 +351,13 @@ impl Compiler {
                     let items: Vec<_> = cdr
                         .iter()
                         .map(|v| match v {
-                            Statement::Value(Value::Symbol(v)) => Ok(v.as_ref()),
+                            Quote::Symbol(v) => Ok(v.as_ref()),
                             _ => Err(Error::ExpectedSymbol),
                         })
                         .collect::<Result<_, _>>()?;
                     self.load_module(name, Some(&items))
                 }
-                Statement::Value(Value::Symbol(v)) => self.load_module(v, None),
+                Quote::Symbol(v) => self.load_module(v, None),
                 _ => Err(Error::ExpectedPairOrSymbol),
             }
         })
@@ -571,7 +582,7 @@ impl Compiler {
                 // Get the symbol of the tail call.
                 //
                 let Statement::Symbol(symbol) = op.as_ref() else {
-                    todo!();
+                    return Err(Error::ExpectedSymbol);
                 };
                 //
                 // Compile the arguments.
@@ -946,12 +957,21 @@ impl Compiler {
                 Ok(())
             }
             Statement::Prog(stmts) => self.compile_statements(ctxt, stmts),
-            Statement::Pair(car, cdr) => {
+            Statement::Backquote(quote) => self.compile_backquote(ctxt, quote),
+            Statement::Quote(quote) => Self::compile_quote(ctxt, quote),
+            Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
+            Statement::Value(value) => Self::compile_value(ctxt, value),
+        }
+    }
+
+    fn compile_backquote(&mut self, ctxt: &mut Context, quote: &Backquote) -> Result<(), Error> {
+        match quote {
+            Backquote::Pair(car, cdr) => {
                 //
                 // Process car and cdr.
                 //
-                self.compile_statement(ctxt, cdr.as_ref())?;
-                self.compile_statement(ctxt, car.as_ref())?;
+                self.compile_backquote(ctxt, cdr.as_ref())?;
+                self.compile_backquote(ctxt, car.as_ref())?;
                 //
                 // Push cons, consume 2 and producing 1.
                 //
@@ -969,8 +989,77 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
-            Statement::Value(value) => Self::compile_value(ctxt, value),
+            Backquote::Symbol(v) => {
+                //
+                // Convert the symbol.
+                //
+                let mut symbol = [0_u8; 15];
+                symbol[..v.len()].copy_from_slice(v.as_bytes());
+                //
+                // Push the opcode.
+                //
+                let opcode = OpCode::Psh(Immediate::Symbol(symbol)).into();
+                ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn += 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            Backquote::Unquote(stmt) => self.compile_statement(ctxt, stmt),
+            Backquote::Value(value) => Self::compile_value(ctxt, value),
+        }
+    }
+
+    fn compile_quote(ctxt: &mut Context, quote: &Quote) -> Result<(), Error> {
+        match quote {
+            Quote::Pair(car, cdr) => {
+                //
+                // Process car and cdr.
+                //
+                Self::compile_quote(ctxt, cdr.as_ref())?;
+                Self::compile_quote(ctxt, car.as_ref())?;
+                //
+                // Push cons, consume 2 and producing 1.
+                //
+                let opcode = OpCode::Cons.into();
+                //
+                // Push the opcode.
+                //
+                ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn -= 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            Quote::Symbol(v) => {
+                //
+                // Convert the symbol.
+                //
+                let mut symbol = [0_u8; 15];
+                symbol[..v.len()].copy_from_slice(v.as_bytes());
+                //
+                // Push the opcode.
+                //
+                let opcode = OpCode::Psh(Immediate::Symbol(symbol)).into();
+                ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn += 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            Quote::Value(value) => Self::compile_value(ctxt, value),
         }
     }
 
@@ -1005,11 +1094,6 @@ impl Compiler {
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
-            Value::Symbol(v) => {
-                let mut symbol = [0_u8; 15];
-                symbol[..v.len()].copy_from_slice(v.as_bytes());
-                OpCode::Psh(Immediate::Symbol(symbol)).into()
-            }
             Value::Wildcard => OpCode::Psh(Immediate::Wildcard).into(),
         };
         //

@@ -684,7 +684,7 @@ mod compiler {
     }
 
     #[test]
-    fn def_loop_with_may_statements_with_tailcall_optimization() -> Result<(), Error> {
+    fn def_loop_with_many_statements_with_tailcall_optimization() -> Result<(), Error> {
         let (_, result) = compile(
             r#"
             (def test()

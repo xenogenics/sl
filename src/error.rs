@@ -20,6 +20,8 @@ pub enum Error {
     ExpectedPairOrImmediate,
     #[error("Expected pair or symbol")]
     ExpectedPairOrSymbol,
+    #[error("Expected quote")]
+    ExpectedQuote,
     #[error("Expected statement")]
     ExpectedStatement,
     #[error("Expected symbol")]

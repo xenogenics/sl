@@ -1,7 +1,8 @@
-use std::io::Read;
+use std::{io::Read, rc::Rc};
 
 use clap::{Parser, arg};
 use sl::{
+    atom::Atom,
     compiler::{Compiler, CompilerTrait},
     grammar::ListsParser,
     vm::VirtualMachine,
@@ -68,7 +69,8 @@ fn main() -> Result<(), Error> {
     //
     // Print the stack.
     //
-    println!("{:?}", result);
+    let atom: Rc<Atom> = result.try_into()?;
+    println!("{atom}");
     //
     // Done.
     //

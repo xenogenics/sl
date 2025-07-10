@@ -198,7 +198,6 @@ pub enum Value {
     True,
     Char(u8),
     Number(i64),
-    Symbol(Box<str>),
     Wildcard,
 }
 
@@ -209,7 +208,6 @@ impl Display for Value {
             Value::True => write!(f, "T"),
             Value::Char(c) => write!(f, "{}", *c as char),
             Value::Number(v) => write!(f, "{v}"),
-            Value::Symbol(v) => write!(f, "{v}"),
             Value::Wildcard => write!(f, "_"),
         }
     }
@@ -224,8 +222,7 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::True => Ok(Self::True),
             Atom::Char(v) => Ok(Self::Char(*v)),
             Atom::Number(v) => Ok(Self::Number(*v)),
-            Atom::Pair(..) | Atom::String(_) => Err(Error::ExpectedValue),
-            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            Atom::Pair(..) | Atom::String(_) | Atom::Symbol(_) => Err(Error::ExpectedValue),
             Atom::Wildcard => Ok(Self::Wildcard),
         }
     }
@@ -239,6 +236,130 @@ impl TryFrom<Rc<Atom>> for Value {
 pub enum Location {
     Any,
     Tail,
+}
+
+//
+// Backquote.
+//
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Backquote {
+    Pair(Box<Backquote>, Box<Backquote>),
+    Symbol(Box<str>),
+    Unquote(Box<Statement>),
+    Value(Value),
+}
+
+impl Backquote {
+    pub fn iter(&self) -> BackquoteIterator<'_> {
+        BackquoteIterator(self)
+    }
+}
+
+impl Backquote {
+    fn try_from_unquote(value: Rc<Atom>) -> Result<Self, Error> {
+        if let Atom::Pair(car, cdr) = value.as_ref()
+            && let Atom::Symbol(v) = car.as_ref()
+            && v.as_ref() == "unquote"
+        {
+            Statement::try_from(cdr.clone())
+                .map(Box::new)
+                .map(Self::Unquote)
+        } else {
+            Self::try_from(value)
+        }
+    }
+}
+
+impl TryFrom<Rc<Atom>> for Backquote {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            Atom::Pair(car, cdr) => {
+                let car = Self::try_from_unquote(car.clone())?;
+                let cdr = Self::try_from(cdr.clone())?;
+                Ok(Self::Pair(car.into(), cdr.into()))
+            }
+            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
+                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
+                acc
+            })),
+            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            _ => value.try_into().map(Self::Value),
+        }
+    }
+}
+
+pub struct BackquoteIterator<'a>(&'a Backquote);
+
+impl<'a> std::iter::Iterator for BackquoteIterator<'a> {
+    type Item = &'a Backquote;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            Backquote::Pair(car, cdr) => {
+                let result = car;
+                self.0 = cdr;
+                Some(result)
+            }
+            _ => None,
+        }
+    }
+}
+
+//
+// Quote.
+//
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Quote {
+    Pair(Box<Quote>, Box<Quote>),
+    Symbol(Box<str>),
+    Value(Value),
+}
+
+impl Quote {
+    pub fn iter(&self) -> QuoteIterator<'_> {
+        QuoteIterator(self)
+    }
+}
+
+impl TryFrom<Rc<Atom>> for Quote {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            Atom::Pair(car, cdr) => {
+                let car = Self::try_from(car.clone())?;
+                let cdr = Self::try_from(cdr.clone())?;
+                Ok(Self::Pair(car.into(), cdr.into()))
+            }
+            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
+                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
+                acc
+            })),
+            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            _ => value.try_into().map(Self::Value),
+        }
+    }
+}
+
+pub struct QuoteIterator<'a>(&'a Quote);
+
+impl<'a> std::iter::Iterator for QuoteIterator<'a> {
+    type Item = &'a Quote;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            Quote::Pair(car, cdr) => {
+                let result = car;
+                self.0 = cdr;
+                Some(result)
+            }
+            _ => None,
+        }
+    }
 }
 
 //
@@ -261,9 +382,13 @@ pub enum Statement {
     Let(Vec<(Box<str>, Statement)>, Statements),
     Prog(Statements),
     //
-    // Pair, symbol and value.
+    // Quotes.
     //
-    Pair(Box<Statement>, Box<Statement>),
+    Backquote(Backquote),
+    Quote(Quote),
+    //
+    // Symbol & value.
+    //
     Symbol(Box<str>),
     Value(Value),
 }
@@ -335,50 +460,6 @@ impl Statement {
         }
     }
 
-    fn from_backquote(atom: Rc<Atom>) -> Result<Self, Error> {
-        match atom.as_ref() {
-            Atom::Pair(car, cdr) => {
-                let car = Self::from_maybe_unquote(car.clone())?;
-                let cdr = Self::from_backquote(cdr.clone())?;
-                Ok(Self::Pair(car.into(), cdr.into()))
-            }
-            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
-                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
-                acc
-            })),
-            _ => {
-                let value: Value = atom.try_into()?;
-                Ok(Self::Value(value))
-            }
-        }
-    }
-
-    fn from_quote(atom: Rc<Atom>) -> Result<Self, Error> {
-        match atom.as_ref() {
-            Atom::Pair(car, cdr) => {
-                let car = Self::from_quote(car.clone())?;
-                let cdr = Self::from_quote(cdr.clone())?;
-                Ok(Self::Pair(car.into(), cdr.into()))
-            }
-            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
-                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
-                acc
-            })),
-            _ => Ok(Self::Value(atom.try_into()?)),
-        }
-    }
-
-    fn from_maybe_unquote(atom: Rc<Atom>) -> Result<Self, Error> {
-        if let Atom::Pair(car, cdr) = atom.as_ref()
-            && let Atom::Symbol(v) = car.as_ref()
-            && v.as_ref() == "unquote"
-        {
-            Statement::try_from(cdr.clone())
-        } else {
-            Self::from_backquote(atom)
-        }
-    }
-
     fn from_pair(atom: Rc<Atom>, rem: Rc<Atom>) -> Result<Self, Error> {
         //
         // Process the atom.
@@ -391,11 +472,11 @@ impl Statement {
                 //
                 // Quote: quasiquote.
                 //
-                "backquote" => Self::from_backquote(rem),
+                "backquote" => Backquote::try_from(rem).map(Self::Backquote),
                 //
                 // Quote: quote.
                 //
-                "quote" => Self::from_quote(rem),
+                "quote" => Quote::try_from(rem).map(Self::Quote),
                 //
                 // Quote: unquote.
                 //
@@ -625,7 +706,7 @@ impl Statement {
                             //
                             // Parse the template.
                             //
-                            let tmpl = Self::from_quote(tmpl.clone())?;
+                            let tmpl = Quote::try_from(tmpl.clone()).map(Statement::Quote)?;
                             //
                             // Build the condition evaluation.
                             //
@@ -879,10 +960,6 @@ impl Statement {
         }
     }
 
-    pub fn iter(&self) -> StatementIterator {
-        StatementIterator(self)
-    }
-
     fn identify_tail_calls(&mut self, name: &str) {
         match self {
             Statement::Apply(stmt, _, location) => {
@@ -962,8 +1039,9 @@ impl Display for Statement {
                 write!(f, ")")
             }
             Statement::Prog(stmts) => write!(f, "(prog {stmts})"),
-            Statement::Pair(..) => write!(f, "(..)"),
-            Statement::Symbol(symbol) => write!(f, "{symbol}"),
+            Statement::Backquote(_) => write!(f, "`(..)"),
+            Statement::Quote(_) => write!(f, "'(..)"),
+            Statement::Symbol(value) => write!(f, "{value}"),
             Statement::Value(value) => write!(f, "{value}"),
         }
     }
@@ -975,29 +1053,9 @@ impl TryFrom<Rc<Atom>> for Statement {
     fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
         match atom.as_ref() {
             Atom::Pair(atom, rem) => Self::from_pair(atom.clone(), rem.clone()),
+            Atom::String(_) => Quote::try_from(atom).map(Self::Quote),
             Atom::Symbol(sym) => Ok(Self::Symbol(sym.clone())),
             _ => Value::try_from(atom).map(Self::Value),
-        }
-    }
-}
-
-//
-// Statement iterator.
-//
-
-pub struct StatementIterator<'a>(&'a Statement);
-
-impl<'a> std::iter::Iterator for StatementIterator<'a> {
-    type Item = &'a Statement;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.0 {
-            Statement::Pair(car, cdr) => {
-                let result = car;
-                self.0 = cdr;
-                Some(result)
-            }
-            _ => None,
         }
     }
 }
