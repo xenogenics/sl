@@ -1,4 +1,4 @@
-use clap::{arg, Parser};
+use clap::{Parser, arg};
 use sl::{compiler::SymbolsAndOpCodes, vm::VirtualMachine};
 use thiserror::Error;
 
@@ -43,7 +43,11 @@ fn main() -> Result<(), Error> {
     //
     // Run the binary.
     //
-    vm.run(syms, ops)?;
+    let result = vm.run(syms, ops)?;
+    //
+    // Print the stack.
+    //
+    println!("{:?}", result);
     //
     // Done.
     //

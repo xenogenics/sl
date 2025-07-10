@@ -1,33 +1,34 @@
+use std::rc::Rc;
+
+use crate::{
+    atom::Atom,
+    compiler::{CompilerTrait, SymbolsAndOpCodes},
+    error::Error,
+    ir::TopLevelStatement,
+};
+
 //
-// Parser.
+// Null compiler.
 //
 
-mod parser {
-    use crate::grammar::ListsParser;
+#[derive(Clone)]
+struct NullCompiler;
 
-    #[test]
-    fn nil() {
-        let parser = ListsParser::new();
-        let result = parser.parse("()").unwrap();
-        assert!(result.len() == 1);
-        assert!(result[0].is_nil());
+impl CompilerTrait for NullCompiler {
+    fn eval(self, _: Rc<Atom>) -> Result<Rc<Atom>, Error> {
+        Err(Error::NotSupported)
     }
 
-    #[test]
-    fn list() {
-        let parser = ListsParser::new();
-        let result = parser.parse("(+ a b)").unwrap();
-        assert!(result.len() == 1);
-        assert!(result[0].is_pair());
+    fn load_atom(&mut self, _: Rc<Atom>) -> Result<(), Error> {
+        Ok(())
     }
 
-    #[test]
-    fn sequence_of_lists() {
-        let parser = ListsParser::new();
-        let result = parser.parse("(+ a b) (- a b)").unwrap();
-        assert!(result.len() == 2);
-        assert!(result[0].is_pair());
-        assert!(result[1].is_pair());
+    fn load_statement(&mut self, _: TopLevelStatement) -> Result<(), Error> {
+        Ok(())
+    }
+
+    fn compile(self) -> Result<SymbolsAndOpCodes, Error> {
+        Ok(Default::default())
     }
 }
 
@@ -36,56 +37,58 @@ mod parser {
 //
 
 mod ir {
-    use crate::{grammar::ListsParser, ir::FunctionDefinition};
+    use std::rc::Rc;
+
+    use crate::{atom::Atom, error::Error, grammar::ListsParser, ir::FunctionDefinition};
     use map_macro::btree_set;
 
-    #[test]
-    fn def_single_statement() {
+    fn parse(stmt: &str) -> Vec<Rc<Atom>> {
         let parser = ListsParser::new();
-        let atoms = parser.parse("(def ADD (A B) (+ A B))").unwrap();
-        let defuns: Vec<_> = atoms
-            .into_iter()
-            .map(FunctionDefinition::try_from)
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(btree_set! {}, defuns[0].closure());
-        let stmt = defuns[0].statements().iter().next().unwrap();
-        assert_eq!(btree_set! {"A".into(), "B".into()}, stmt.closure());
+        let mut compiler = super::NullCompiler;
+        parser.parse(&mut compiler, stmt).unwrap()
     }
 
     #[test]
-    fn def_with_lambda_with_external_bindings() {
-        let parser = ListsParser::new();
-        let atoms = parser.parse("(def test(a) ((\\ (b) (+ a b)) 1))").unwrap();
+    fn def_single_statement() -> Result<(), Error> {
+        let atoms = parse("(def ADD (A B) (+ A B))");
         let defuns: Vec<_> = atoms
             .into_iter()
             .map(FunctionDefinition::try_from)
-            .collect::<Result<_, _>>()
-            .unwrap();
+            .collect::<Result<_, _>>()?;
+        assert_eq!(btree_set! {}, defuns[0].closure());
+        let stmt = defuns[0].statements().iter().next().unwrap();
+        assert_eq!(btree_set! {"A".into(), "B".into()}, stmt.closure());
+        Ok(())
+    }
+
+    #[test]
+    fn def_with_lambda_with_external_bindings() -> Result<(), Error> {
+        let atoms = parse("(def test(a) ((\\ (b) (+ a b)) 1))");
+        let defuns: Vec<_> = atoms
+            .into_iter()
+            .map(FunctionDefinition::try_from)
+            .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
         assert_eq!(btree_set! {"a".into()}, stmt.closure());
         let stmt = stmt.statements().next().unwrap();
         assert_eq!(btree_set! {"a".into()}, stmt.closure());
+        Ok(())
     }
 
     #[test]
-    fn def_with_nested_lambda_with_external_bindings() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def test(a)
-                    ((\ (b)
-                        ((\ (c) (+ a (+ b c ))) 1)) 2))
-                "#,
-            )
-            .unwrap();
+    fn def_with_nested_lambda_with_external_bindings() -> Result<(), Error> {
+        let atoms = parse(
+            r#"
+            (def test(a)
+                ((\ (b)
+                    ((\ (c) (+ a (+ b c ))) 1)) 2))
+            "#,
+        );
         let defuns: Vec<_> = atoms
             .into_iter()
             .map(FunctionDefinition::try_from)
-            .collect::<Result<_, _>>()
-            .unwrap();
+            .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
         assert_eq!(btree_set! {"a".into()}, stmt.closure());
@@ -93,25 +96,23 @@ mod ir {
         assert_eq!(btree_set! {"a".into()}, stmt.closure());
         let stmt = stmt.statements().next().unwrap();
         assert_eq!(btree_set! {"a".into(), "b".into()}, stmt.closure());
+        Ok(())
     }
 
     #[test]
-    fn def_with_let_and_lambda_with_external_bindings() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse("(def test(a) (let ((inc . (\\ (b) (+ a b)))) (- 2 (inc 1))))")
-            .unwrap();
+    fn def_with_let_and_lambda_with_external_bindings() -> Result<(), Error> {
+        let atoms = parse("(def test(a) (let ((inc . (\\ (b) (+ a b)))) (- 2 (inc 1))))");
         let defuns: Vec<_> = atoms
             .into_iter()
             .map(FunctionDefinition::try_from)
-            .collect::<Result<_, _>>()
-            .unwrap();
+            .collect::<Result<_, _>>()?;
         println!("{:?}", defuns);
         println!("{:?}", defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
         println!("{:?}", stmt.closure());
         let stmt = stmt.statements().next().unwrap();
         println!("{:?}", stmt.closure());
+        Ok(())
     }
 }
 
@@ -121,21 +122,54 @@ mod ir {
 
 mod compiler {
     use crate::{
-        compiler::{Compiler, Context, LabelOrOpCode},
+        compiler::{Compiler, CompilerTrait, Context, LabelOrOpCode, SymbolsAndOpCodes},
         error::Error,
         grammar::ListsParser,
         ir::Statement,
         opcodes::{Arity, Immediate, OpCode},
     };
 
-    #[test]
-    fn single_builtin() {
+    fn parse(stmt: &str) -> Result<Context, Error> {
+        //
+        // Parse the statement, using a Null compiler.
+        //
+        let mut compiler = super::NullCompiler;
         let parser = ListsParser::new();
-        let atom = parser.parse("(+ 1 2)").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
+        let mut atoms = parser
+            .parse(&mut compiler, stmt)
+            .map_err(|e| Error::Parse(e.to_string()))?;
+        let stmt: Statement = atoms.remove(0).try_into()?;
+        //
+        // Compile the statement.
+        //
         let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+        let mut context = Context::default();
+        compiler.compile_statement(&mut context, &stmt)?;
+        Ok(context)
+    }
+
+    fn compile(stmt: &str) -> Result<SymbolsAndOpCodes, Error> {
+        let parser = ListsParser::new();
+        let mut compiler = Compiler::default();
+        let _ = parser
+            .parse(&mut compiler, stmt)
+            .map_err(|e| Error::Parse(e.to_string()))?;
+        compiler.compile()
+    }
+
+    fn compile_with_operators(stmt: &str) -> Result<SymbolsAndOpCodes, Error> {
+        let parser = ListsParser::new();
+        let mut compiler = Compiler::default();
+        compiler.lift_operators()?;
+        let _ = parser
+            .parse(&mut compiler, stmt)
+            .map_err(|e| Error::Parse(e.to_string()))?;
+        compiler.compile()
+    }
+
+    #[test]
+    fn single_builtin() -> Result<(), Error> {
+        let context = parse("(+ 1 2)")?;
         assert_eq!(
             context.stream(),
             &[
@@ -144,16 +178,12 @@ mod compiler {
                 OpCode::Add.into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn nested_builtin() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(+ (- 3 4) 2)").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn nested_builtin() -> Result<(), Error> {
+        let context = parse("(+ (- 3 4) 2)")?;
         assert_eq!(
             context.stream(),
             &[
@@ -164,16 +194,12 @@ mod compiler {
                 OpCode::Add.into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn if_then() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(if (< 3 0) (+ 1 2))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn if_then() -> Result<(), Error> {
+        let context = parse("(if (< 3 0) (+ 1 2))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -188,19 +214,12 @@ mod compiler {
                 OpCode::Psh(Immediate::Nil).into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn if_then_else() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(if (< 3 0) (+ 1 2) (- 4 2))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn if_then_else() -> Result<(), Error> {
+        let context = parse("(if (< 3 0) (+ 1 2) (- 4 2))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -217,19 +236,12 @@ mod compiler {
                 OpCode::Sub.into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn nested_if_then() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(if (< 3 0) (if (>= 1 4) (- 4 2)))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn nested_if_then() -> Result<(), Error> {
+        let context = parse("(if (< 3 0) (if (>= 1 4) (- 4 2)))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -250,16 +262,12 @@ mod compiler {
                 OpCode::Psh(Immediate::Nil).into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn unless() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(unless (< 3 0) (+ 1 2))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn unless() -> Result<(), Error> {
+        let context = parse("(unless (< 3 0) (+ 1 2))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -275,16 +283,12 @@ mod compiler {
                 OpCode::Psh(Immediate::Nil).into(),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn let_binding_with_a_single_constant() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(let ((a . 1)) (+ a 1))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn let_binding_with_a_single_constant() -> Result<(), Error> {
+        let context = parse("(let ((a . 1)) (+ a 1))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -295,20 +299,13 @@ mod compiler {
                 OpCode::Rot(2).into(),
                 OpCode::Pop(1).into(),
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn let_binding_with_a_single_funcall() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(let ((a . (+ 1 2))) (+ a 1))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn let_binding_with_a_single_funcall() -> Result<(), Error> {
+        let context = parse("(let ((a . (+ 1 2))) (+ a 1))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -321,20 +318,13 @@ mod compiler {
                 OpCode::Rot(2).into(),
                 OpCode::Pop(1).into(),
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn let_binding_with_multiple_bindings() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(let ((a . (+ 1 2)) (b . 2)) (+ a b))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn let_binding_with_multiple_bindings() -> Result<(), Error> {
+        let context = parse("(let ((a . (+ 1 2)) (b . 2)) (+ a b))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -348,20 +338,13 @@ mod compiler {
                 OpCode::Rot(3).into(),
                 OpCode::Pop(2).into(),
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn nested_let_bindings() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(let ((a . (+ 1 2))) (let ((b . (+ a 3))) (- a b)))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn nested_let_bindings() -> Result<(), Error> {
+        let context = parse("(let ((a . (+ 1 2))) (let ((b . (+ a 3))) (- a b)))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -379,34 +362,26 @@ mod compiler {
                 OpCode::Rot(2).into(),
                 OpCode::Pop(1).into(),
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn lambda() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(\\ (a b) (+ a b))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn lambda() -> Result<(), Error> {
+        let context = parse("(\\ (a b) (+ a b))")?;
         assert_eq!(
             context.stream(),
             &[
                 LabelOrOpCode::Funcall("LAMBDA_0000".into()).into(),
                 OpCode::Pak(1).into()
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn quote() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(car '(1 2 3))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn quote() -> Result<(), Error> {
+        let context = parse("(car '(1 2 3))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -420,16 +395,12 @@ mod compiler {
                 OpCode::Car.into()
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn backquote_with_unquoted_list() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(car `(1 ,(+ 1 2) 3))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn backquote_with_unquoted_list() -> Result<(), Error> {
+        let context = parse("(car `(1 ,(+ 1 2) 3))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -445,16 +416,12 @@ mod compiler {
                 OpCode::Car.into()
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn backquote_with_unquoted_symbol() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(car `(1 ,V 3))").unwrap().remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn backquote_with_unquoted_symbol() -> Result<(), Error> {
+        let context = parse("(car `(1 ,V 3))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -468,27 +435,19 @@ mod compiler {
                 OpCode::Car.into()
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn quote_with_double_unquote() {
-        let parser = ListsParser::new();
-        let atom = parser.parse("(car `(1 ,(,V) 3))").unwrap().remove(0);
-        let res: Result<Statement, Error> = atom.try_into();
+    fn quote_with_double_unquote() -> Result<(), Error> {
+        let res = parse("(car `(1 ,(,V) 3))");
         assert!(matches!(res, Err(Error::UnquoteOutsideBackquote)));
+        Ok(())
     }
 
     #[test]
-    fn nested_backquote_unquote() {
-        let parser = ListsParser::new();
-        let atom = parser
-            .parse("(car `(1 ,(car `(1 ,V 2)) 3))")
-            .unwrap()
-            .remove(0);
-        let stmt: Statement = atom.try_into().unwrap();
-        let mut context = Context::default();
-        let mut compiler = Compiler::default();
-        compiler.compile_statement(&mut context, &stmt).unwrap();
+    fn nested_backquote_unquote() -> Result<(), Error> {
+        let context = parse("(car `(1 ,(car `(1 ,V 2)) 3))")?;
         assert_eq!(
             context.stream(),
             &[
@@ -509,14 +468,12 @@ mod compiler {
                 OpCode::Car.into()
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_single_statement() {
-        let parser = ListsParser::new();
-        let atoms = parser.parse("(def ADD (A B) (+ A B))").unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_single_statement() -> Result<(), Error> {
+        let (_, result) = compile("(def ADD (A B) (+ A B))")?;
         assert_eq!(
             result,
             vec![
@@ -529,14 +486,12 @@ mod compiler {
                 OpCode::Ret,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_multiple_statements() {
-        let parser = ListsParser::new();
-        let atoms = parser.parse("(def ADD (A B C) (+ A B) (- A C))").unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_multiple_statements() -> Result<(), Error> {
+        let (_, result) = compile("(def ADD (A B C) (+ A B) (- A C))")?;
         assert_eq!(
             result,
             vec![
@@ -553,21 +508,17 @@ mod compiler {
                 OpCode::Ret,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def ADD (A B C) (+ A B) (- A C))
-                (def main () (ADD 1 2 3))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_with_main() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def ADD (A B C) (+ A B) (- A C))
+            (def main () (ADD 1 2 3))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -596,16 +547,12 @@ mod compiler {
                 OpCode::Ret,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_fibonacci() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse("(def fib (N) (if (<= N 1) N (+ (fib (- N 1)) (fib (- N 2)))))")
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_fibonacci() -> Result<(), Error> {
+        let (_, result) = compile("(def fib (N) (if (<= N 1) N (+ (fib (- N 1)) (fib (- N 2)))))")?;
         assert_eq!(
             result,
             vec![
@@ -632,16 +579,13 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_with_let_and_lambda() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse("(def test(a) (let ((add . (\\ (b c) (+ b c)))) (- a (add 1 2))))")
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_with_let_and_lambda() -> Result<(), Error> {
+        let (_, result) =
+            compile("(def test(a) (let ((add . (\\ (b c) (+ b c)))) (- a (add 1 2))))")?;
         assert_eq!(
             result,
             vec![
@@ -673,24 +617,20 @@ mod compiler {
                 OpCode::Pop(1),                                     // [ret0, a-3]
                 OpCode::Ret
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn def_with_lambda_with_external_bindings() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def test(a)
-                    (let ((add . (\ (b)
-                                    ((\ () (+ a b))))))
-                        (add 1)))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_with_lambda_with_external_bindings() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def test(a)
+                (let ((add . (\ (b)
+                                ((\ () (+ a b))))))
+                    (add 1)))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -732,32 +672,26 @@ mod compiler {
                 OpCode::Pop(1),                                     // [ret0, a+1]
                 OpCode::Ret                                         // [a+1]
             ]
-        )
+        );
+        Ok(())
     }
 
     #[test]
-    fn def_loop_with_tailcall_optimization() {
-        let parser = ListsParser::new();
-        let atoms = parser.parse("(def test() (test))").unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_loop_with_tailcall_optimization() -> Result<(), Error> {
+        let (_, result) = compile("(def test() (test))")?;
         assert_eq!(result, vec![OpCode::Br(0)]);
+        Ok(())
     }
 
     #[test]
-    fn def_loop_with_may_statements_with_tailcall_optimization() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def test()
-                    (+ 1 1)
-                    (test))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_loop_with_may_statements_with_tailcall_optimization() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def test()
+                (+ 1 1)
+                (test))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -768,16 +702,12 @@ mod compiler {
                 OpCode::Br(-4),
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_if_then_with_tailcall_optimization() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse("(def test (a b) (if a (test (cdr a) (cdr b))))")
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_if_then_with_tailcall_optimization() -> Result<(), Error> {
+        let (_, result) = compile("(def test (a b) (if a (test (cdr a) (cdr b))))")?;
         assert_eq!(
             result,
             vec![
@@ -797,24 +727,20 @@ mod compiler {
                 OpCode::Ret                  // [nil]
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_if_then_else_with_tailcall_optimization() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def test(a)
-                    (if a
-                        (test (cdr a))
-                        (test (car a))
-                    ))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+    fn def_if_then_else_with_tailcall_optimization() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def test(a)
+                (if a
+                    (test (cdr a))
+                    (test (car a))
+                ))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -833,28 +759,24 @@ mod compiler {
                 OpCode::Br(-11), //
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_capture_all_arguments_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def count_args_r (A)
-                    (if A
-                        (+ 1 (count_args_r (cdr A)))
-                        0))
+    fn def_capture_all_arguments_with_main() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def count_args_r (A)
+                (if A
+                    (+ 1 (count_args_r (cdr A)))
+                    0))
 
-                (def count_args A (count_args_r A))
+            (def count_args A (count_args_r A))
 
-                (def main ()
-                    (count_args 1 2 3 4))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (count_args 1 2 3 4))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -897,23 +819,19 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_empty_capture_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def count_args A (if A 1 0))
+    fn def_empty_capture_with_main() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def count_args A (if A 1 0))
 
-                (def main ()
-                    (count_args))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (count_args))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -937,23 +855,19 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_remainder_capture_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def select (A B . C) (if C A B))
+    fn def_remainder_capture_with_main() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def select (A B . C) (if C A B))
 
-                (def main ()
-                    (select 1 2 3 4))
-                "#,
-            )
-            .unwrap();
-        let compiler = Compiler::default();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (select 1 2 3 4))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -981,26 +895,21 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_operator_currying_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def incr (A)
-                    (let ((+1 . (+ 1)))
-                        (+1 A)))
+    fn def_operator_currying_with_main() -> Result<(), Error> {
+        let (_, result) = compile_with_operators(
+            r#"
+            (def incr (A)
+                (let ((+1 . (+ 1)))
+                    (+1 A)))
 
-                (def main ()
-                    (incr 1))
-                "#,
-            )
-            .unwrap();
-        let mut compiler = Compiler::default();
-        compiler.lift_operators().unwrap();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (incr 1))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1038,28 +947,23 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_cond_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def check (A)
-                    (cond A
-                        (num? . 0)
-                        (lst? . 1)
-                        ((= 0) . 2)))
+    fn def_cond_with_main() -> Result<(), Error> {
+        let (_, result) = compile_with_operators(
+            r#"
+            (def check (A)
+                (cond A
+                    (num? . 0)
+                    (lst? . 1)
+                    ((= 0) . 2)))
 
-                (def main ()
-                    (check 1))
-                "#,
-            )
-            .unwrap();
-        let mut compiler = Compiler::default();
-        compiler.lift_operators().unwrap();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (check 1))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1131,28 +1035,23 @@ mod compiler {
                 OpCode::Ret,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_cond_with_catchall_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def check (A)
-                    (cond A
-                        (num? . 0)
-                        (lst? . 1)
-                        (_ . 2)))
+    fn def_cond_with_catchall_with_main() -> Result<(), Error> {
+        let (_, result) = compile_with_operators(
+            r#"
+            (def check (A)
+                (cond A
+                    (num? . 0)
+                    (lst? . 1)
+                    (_ . 2)))
 
-                (def main ()
-                    (check 1))
-                "#,
-            )
-            .unwrap();
-        let mut compiler = Compiler::default();
-        compiler.lift_operators().unwrap();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (check 1))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1206,29 +1105,23 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_cond_with_ooo_catchall_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def check (A)
-                    (cond A
-                        (num? . 0)
-                        (_ . 2)
-                        (lst? . 1)))
+    fn def_cond_with_ooo_catchall_with_main() -> Result<(), Error> {
+        let (_, result) = compile_with_operators(
+            r#"
+            (def check (A)
+                (cond A
+                    (num? . 0)
+                    (_ . 2)
+                    (lst? . 1)))
 
-                (def main ()
-                    (check 1))
-                "#,
-            )
-            .unwrap();
-        let mut compiler = Compiler::default();
-        compiler.lift_operators().unwrap();
-        let (_, result) = compiler.compile(atoms).unwrap();
-        println!("{result:?}");
+            (def main ()
+                (check 1))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1267,28 +1160,23 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn def_match_with_main() {
-        let parser = ListsParser::new();
-        let atoms = parser
-            .parse(
-                r#"
-                (def check (A)
-                    (match A
-                        ((1 (2 _)) . 0)
-                        (SYM . 1)
-                        (_ . 2)))
+    fn def_match_with_main() -> Result<(), Error> {
+        let (_, result) = compile(
+            r#"
+            (def check (A)
+                (match A
+                    ((1 (2 _)) . 0)
+                    (SYM . 1)
+                    (_ . 2)))
 
-                (def main ()
-                    (check 1))
-                "#,
-            )
-            .unwrap();
-        let mut compiler = Compiler::default();
-        compiler.lift_operators().unwrap();
-        let (_, result) = compiler.compile(atoms).unwrap();
+            (def main ()
+                (check 1))
+            "#,
+        )?;
         assert_eq!(
             result,
             vec![
@@ -1334,5 +1222,6 @@ mod compiler {
                 OpCode::Ret
             ]
         );
+        Ok(())
     }
 }

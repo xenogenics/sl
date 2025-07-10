@@ -25,7 +25,7 @@ impl VirtualMachine {
         &mut self,
         syms: Vec<(Box<str>, usize, Arity)>,
         ops: Vec<OpCode>,
-    ) -> Result<(), Error> {
+    ) -> Result<Value, Error> {
         //
         // Look-up the main function.
         //
@@ -475,13 +475,9 @@ impl VirtualMachine {
             pc += 1;
         }
         //
-        // Print the stack.
-        //
-        println!("{:?}", self.stack);
-        //
         // Done.
         //
-        Ok(())
+        Ok(self.stack.pop())
     }
 }
 

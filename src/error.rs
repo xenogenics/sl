@@ -16,6 +16,8 @@ pub enum Error {
     ExpectedModuleLoad,
     #[error("Expected pair")]
     ExpectedPair,
+    #[error("Expected pair or immediate")]
+    ExpectedPairOrImmediate,
     #[error("Expected pair or symbol")]
     ExpectedPairOrSymbol,
     #[error("Expected statement")]
@@ -40,6 +42,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Main endpoint not defined")]
     MainNotDefined,
+    #[cfg(test)]
+    #[error("No such context")]
+    NoSuchContext,
+    #[cfg(test)]
+    #[error("Operation not supported")]
+    NotSupported,
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("Unquote outside backquote context")]

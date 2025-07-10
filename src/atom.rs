@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use crate::{error::Error, heap, opcodes, stack};
+
 //
 // Atom.
 //
@@ -151,6 +153,67 @@ impl std::iter::Iterator for AtomIterator {
                 Some(value)
             }
             _ => None,
+        }
+    }
+}
+
+//
+// From<opcodes::Immediate>.
+//
+//
+
+impl TryFrom<opcodes::Immediate> for Rc<Atom> {
+    type Error = Error;
+
+    fn try_from(value: opcodes::Immediate) -> Result<Self, Self::Error> {
+        match value {
+            opcodes::Immediate::Nil => Ok(Atom::Nil.into()),
+            opcodes::Immediate::True => Ok(Atom::True.into()),
+            opcodes::Immediate::Char(v) => Ok(Atom::Char(v).into()),
+            opcodes::Immediate::Number(v) => Ok(Atom::Number(v).into()),
+            opcodes::Immediate::Symbol(v) => {
+                let index = v.iter().position(|v| *v == 0).unwrap_or(v.len());
+                let value = String::from_utf8_lossy(&v[0..index]).to_string();
+                Ok(Atom::Symbol(value.into_boxed_str()).into())
+            }
+            opcodes::Immediate::Wildcard => Ok(Atom::Wildcard.into()),
+            _ => todo!(),
+        }
+    }
+}
+
+//
+// From<stack::Value>.
+//
+
+impl TryFrom<heap::Value> for Rc<Atom> {
+    type Error = Error;
+
+    fn try_from(value: heap::Value) -> Result<Self, Self::Error> {
+        match value {
+            heap::Value::Immediate(v) => v.try_into(),
+            heap::Value::Pair(car, cdr) => {
+                let car = car.as_ref().clone().try_into()?;
+                let cdr = cdr.as_ref().clone().try_into()?;
+                Ok(Atom::Pair(car, cdr).into())
+            }
+            _ => Err(Error::ExpectedPairOrImmediate),
+        }
+    }
+}
+
+//
+// From<stack::Value>.
+//
+
+impl TryFrom<stack::Value> for Rc<Atom> {
+    type Error = Error;
+
+    fn try_from(value: stack::Value) -> Result<Self, Self::Error> {
+        match value {
+            stack::Value::Heap(v) => v.as_ref().clone().try_into(),
+            stack::Value::Immediate(v) => v.try_into(),
+            _ => Err(Error::ExpectedPairOrImmediate),
         }
     }
 }

@@ -1,12 +1,19 @@
 use std::rc::Rc;
 
-use crate::atom::Atom;
+use lalrpop_util::ParseError;
 
-grammar;
+use crate::atom::Atom;
+use crate::compiler::CompilerTrait;
+
+grammar<C>(compiler: &mut C) where C: CompilerTrait;
+
+extern {
+  type Error = crate::error::Error;
+}
 
 match {
-	"(", ")", ".", "`", "'", ",",
-	r"\^(print - \\ | \\\\ | \\e | \\n | \\r | \\t)" => Char,
+	"(", ")", ".", "`", "'", ",", "~",
+	r"\^([!-\[]|[\]-~]|\\\\|\\e|\\n|\\r|\\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
 	"nil" => Nil,
@@ -19,10 +26,14 @@ match {
 }
 
 pub Lists: Vec<Rc<Atom>> = {
-	<e:List> => vec![e],
-	<mut a:Lists> <b:List> => {
+	<e:List> =>? {
+		compiler.load_atom(e.clone())?;
+		Ok(vec![e])
+	},
+	<mut a:Lists> <b:List> =>? {
+		compiler.load_atom(b.clone())?;
 		a.push(b); 
-		a
+		Ok(a)
 	}
 }
 
@@ -33,7 +44,14 @@ List: Rc<Atom> = {
 }
 
 Items: Rc<Atom> = {
-    <e:ListOrTerminal>           => Atom::cons(e, Atom::nil()),
+    "~" <e:ListOrTerminal> =>? {
+		compiler.clone().eval(e).map_err(|error| ParseError::User { error })
+	},
+    "~" <e:ListOrTerminal> <v:Items> =>? {
+		let e = compiler.clone().eval(e).map_err(|error| ParseError::User { error })?;
+		Ok(Atom::conc(e, v))
+	},
+    <e:ListOrTerminal> => Atom::cons(e, Atom::nil()),
     <e:ListOrTerminal> <v:Items> => Atom::cons(e, v),
 }
 
@@ -44,8 +62,8 @@ ListOrTerminal: Rc<Atom> = {
 	"'" <e:Terminal> => Atom::cons(Atom::symbol("quote"), e),
 	"," <e:List>     => Atom::cons(Atom::symbol("unquote"), e),
 	"," <e:Terminal> => Atom::cons(Atom::symbol("unquote"), e),
-	<e:List>         => e,
-	<e:Terminal>     => e,
+		<e:List>     => e,
+		<e:Terminal> => e,
 }
 
 Terminal: Rc<Atom> = {

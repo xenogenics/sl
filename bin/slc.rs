@@ -1,7 +1,10 @@
 use std::io::Read;
 
-use clap::{arg, Parser};
-use sl::{compiler::Compiler, grammar::ListsParser};
+use clap::{Parser, arg};
+use sl::{
+    compiler::{Compiler, CompilerTrait},
+    grammar::ListsParser,
+};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -36,18 +39,21 @@ fn main() -> Result<(), Error> {
     let mut file = std::fs::File::open(&args.file)?;
     file.read_to_string(&mut source)?;
     //
-    // Parse the source file.
-    //
-    let parser = ListsParser::new();
-    let atoms = parser
-        .parse(&source)
-        .map_err(|v| Error::Parse(v.to_string()))?;
-    //
-    // Compile the atoms.
+    // Create the compiler.
     //
     let mut compiler = Compiler::default();
     compiler.lift_operators()?;
-    let state = compiler.compile(atoms)?;
+    //
+    // Parse the source file.
+    //
+    let parser = ListsParser::new();
+    let _ = parser
+        .parse(&mut compiler, &source)
+        .map_err(|v| Error::Parse(v.to_string()))?;
+    //
+    // Generate the bytecode.
+    //
+    let state = compiler.compile()?;
     //
     // Write the serialize output.
     //

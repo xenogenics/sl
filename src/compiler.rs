@@ -14,13 +14,14 @@ use crate::{
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
     syscalls,
+    vm::VirtualMachine,
 };
 
 //
 // Context.
 //
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Context {
     arity: Arity,
     locals: HashMap<Box<str>, Vec<usize>>,
@@ -97,10 +98,21 @@ type Stream = VecDeque<LabelOrOpCode>;
 pub type SymbolsAndOpCodes = (Vec<(Box<str>, usize, Arity)>, OpCodes);
 
 //
+// Compiler trait.
+//
+
+pub trait CompilerTrait: Clone {
+    fn eval(self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error>;
+    fn load_atom(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
+    fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error>;
+    fn compile(self) -> Result<SymbolsAndOpCodes, Error>;
+}
+
+//
 // Compiler.
 //
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Compiler {
     blocks: Vec<(Box<str>, Context)>,
     defuns: HashMap<Box<str>, Arity>,
@@ -109,18 +121,66 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    pub fn compile(mut self, atoms: Vec<Rc<Atom>>) -> Result<SymbolsAndOpCodes, Error> {
+    fn label(&mut self, prefix: &str) -> Box<str> {
+        let label = format!("{prefix}_{:04}", self.lcount).into_boxed_str();
+        self.lcount += 1;
+        label
+    }
+}
+
+//
+// Compiler trait.
+//
+
+impl CompilerTrait for Compiler {
+    fn eval(mut self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error> {
         //
-        // Rewrite the atoms using our intermediate representation.
+        // Convert the atom into a statement.
         //
-        let stmts: Vec<_> = atoms
-            .into_iter()
-            .map(TopLevelStatement::try_from)
-            .collect::<Result<_, _>>()?;
+        let stmt = Statement::try_from(atom)?;
         //
-        // Recursively load files and compile function definitions.
+        // Wrap the statement in a main function definition.
         //
-        self.load_and_compile(stmts)?;
+        let topl = TopLevelStatement::FunctionDefinition(FunctionDefinition::new(
+            "main".into(),
+            Arguments::None,
+            Statements::new(vec![stmt]),
+        ));
+        //
+        // Load the top-level statement.
+        //
+        self.load_statement(topl)?;
+        //
+        // Generate the bytecode.
+        //
+        let (syms, ops) = self.compile()?;
+        //
+        // Build the virtual machine.
+        //
+        let mut vm = VirtualMachine::new(1024, false);
+        //
+        // Run.
+        //
+        let result = vm.run(syms, ops)?;
+        //
+        // Convert the result into an atom.
+        //
+        result.try_into()
+    }
+
+    fn load_atom(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
+        let stmt: TopLevelStatement = atom.try_into()?;
+        self.load_statement(stmt)
+    }
+
+    fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
+        match stmt {
+            TopLevelStatement::FunctionDefinition(v) => self.compile_defun(v),
+            TopLevelStatement::Load(v) => self.load_modules(v),
+        }
+    }
+
+    fn compile(self) -> Result<SymbolsAndOpCodes, Error> {
         //
         // Collect the live defuns.
         //
@@ -193,19 +253,6 @@ impl Compiler {
         //
         Ok((index, opcodes))
     }
-
-    fn load_and_compile(&mut self, stmts: Vec<TopLevelStatement>) -> Result<(), Error> {
-        stmts.iter().try_for_each(|v| match v {
-            TopLevelStatement::FunctionDefinition(v) => self.compile_defun(v),
-            TopLevelStatement::Load(v) => self.load_modules(v),
-        })
-    }
-
-    fn label(&mut self, prefix: &str) -> Box<str> {
-        let label = format!("{prefix}_{:04}", self.lcount).into_boxed_str();
-        self.lcount += 1;
-        label
-    }
 }
 
 //
@@ -277,14 +324,14 @@ impl Compiler {
 //
 
 impl Compiler {
-    fn load_modules(&mut self, stmts: &Statements) -> Result<(), Error> {
+    fn load_modules(&mut self, stmts: Statements) -> Result<(), Error> {
         stmts.iter().try_for_each(|v| {
             match v {
                 Statement::Pair(car, cdr) => {
                     //
                     // Get the name of the module.
                     //
-                    let Statement::Symbol(name) = car.as_ref() else {
+                    let Statement::Value(Value::Symbol(name)) = car.as_ref() else {
                         return Err(Error::ExpectedSymbol);
                     };
                     //
@@ -293,13 +340,13 @@ impl Compiler {
                     let items: Vec<_> = cdr
                         .iter()
                         .map(|v| match v {
-                            Statement::Symbol(v) => Ok(v.as_ref()),
+                            Statement::Value(Value::Symbol(v)) => Ok(v.as_ref()),
                             _ => Err(Error::ExpectedSymbol),
                         })
                         .collect::<Result<_, _>>()?;
                     self.load_module(name, Some(&items))
                 }
-                Statement::Symbol(v) => self.load_module(v, None),
+                Statement::Value(Value::Symbol(v)) => self.load_module(v, None),
                 _ => Err(Error::ExpectedPairOrSymbol),
             }
         })
@@ -318,11 +365,16 @@ impl Compiler {
         let mut file = std::fs::File::open(path)?;
         file.read_to_string(&mut source)?;
         //
+        // Create a temporary compiler for the source file.
+        //
+        let mut compiler = Self::default();
+        compiler.lift_operators()?;
+        //
         // Parse the source file.
         //
         let parser = ListsParser::new();
         let atoms = parser
-            .parse(&source)
+            .parse(&mut compiler, &source)
             .map_err(|v| Error::Parse(v.to_string()))?;
         //
         // Rewrite the atoms using our intermediate representation.
@@ -343,7 +395,7 @@ impl Compiler {
         //
         // Process the statements.
         //
-        self.load_and_compile(stmts)
+        stmts.into_iter().try_for_each(|v| self.load_statement(v))
     }
 }
 
@@ -352,7 +404,7 @@ impl Compiler {
 //
 
 impl Compiler {
-    fn compile_defun(&mut self, defun: &FunctionDefinition) -> Result<(), Error> {
+    fn compile_defun(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
         let mut ctxt = Context::new(arity);
@@ -1021,7 +1073,7 @@ impl Compiler {
         //
         // Compile the statements.
         //
-        self.load_and_compile(stmts)
+        stmts.into_iter().try_for_each(|v| self.load_statement(v))
     }
 
     fn lift(op: Operator) -> TopLevelStatement {
