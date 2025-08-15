@@ -9,13 +9,15 @@ use crate::{
 };
 
 pub struct VirtualMachine {
+    entry: String,
     stack: Stack,
     trace: bool,
 }
 
 impl VirtualMachine {
-    pub fn new(capacity: usize, trace: bool) -> Self {
+    pub fn new(entry: &str, capacity: usize, trace: bool) -> Self {
         Self {
+            entry: entry.to_string(),
             stack: Stack::new(capacity),
             trace,
         }
@@ -27,16 +29,16 @@ impl VirtualMachine {
         ops: Vec<OpCode>,
     ) -> Result<Value, Error> {
         //
-        // Look-up the main function.
+        // Look-up the entrypoint function.
         //
-        let main_fn = syms
+        let entrypoint_fn = syms
             .iter()
-            .find_map(|(k, v, _)| (k.as_ref() == "main").then_some(v))
+            .find_map(|(k, v, _)| (k.as_ref() == self.entry.as_str()).then_some(v))
             .copied();
         //
         // Make sure it exists.
         //
-        let Some(mut pc) = main_fn else {
+        let Some(mut pc) = entrypoint_fn else {
             return Err(Error::MainNotDefined);
         };
         //
@@ -245,6 +247,10 @@ impl VirtualMachine {
                 }
                 OpCode::IsTru => {
                     let r = matches!(self.stack.pop(), Value::Immediate(Immediate::True));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsWld => {
+                    let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Wildcard));
                     self.stack.push(Value::Immediate(r.into()));
                 }
                 //

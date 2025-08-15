@@ -37,9 +37,9 @@ impl CompilerTrait for NullCompiler {
 //
 
 mod ir {
-    use std::rc::Rc;
+    use std::{collections::HashSet, rc::Rc};
 
-    use crate::{atom::Atom, error::Error, grammar::ListsParser, ir::FunctionDefinition};
+    use crate::{atom::Atom, error::Error, grammar::ListsParser, ir::TopLevelStatement};
     use map_macro::btree_set;
 
     fn parse(stmt: &str) -> Vec<Rc<Atom>> {
@@ -53,7 +53,7 @@ mod ir {
         let atoms = parse("(def ADD (A B) (+ A B))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(FunctionDefinition::try_from)
+            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -66,7 +66,7 @@ mod ir {
         let atoms = parse("(def test(a) ((\\ (b) (+ a b)) 1))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(FunctionDefinition::try_from)
+            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -87,7 +87,7 @@ mod ir {
         );
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(FunctionDefinition::try_from)
+            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -104,7 +104,7 @@ mod ir {
         let atoms = parse("(def test(a) (let ((inc . (\\ (b) (+ a b)))) (- 2 (inc 1))))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(FunctionDefinition::try_from)
+            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
             .collect::<Result<_, _>>()?;
         println!("{:?}", defuns);
         println!("{:?}", defuns[0].closure());
@@ -121,6 +121,8 @@ mod ir {
 //
 
 mod compiler {
+    use std::collections::HashSet;
+
     use crate::{
         compiler::{Compiler, CompilerTrait, Context, LabelOrOpCode, SymbolsAndOpCodes},
         error::Error,
@@ -138,7 +140,7 @@ mod compiler {
         let mut atoms = parser
             .parse(&mut compiler, stmt)
             .map_err(|e| Error::Parse(e.to_string()))?;
-        let stmt: Statement = atoms.remove(0).try_into()?;
+        let stmt = Statement::from_atom(atoms.remove(0), &HashSet::default())?;
         //
         // Compile the statement.
         //

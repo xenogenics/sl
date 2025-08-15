@@ -116,6 +116,7 @@ pub trait CompilerTrait: Clone {
 pub struct Compiler {
     blocks: Vec<(Box<str>, Context)>,
     defuns: HashMap<Box<str>, Arity>,
+    macros: HashSet<Box<str>>,
     labels: HashMap<Box<str>, usize>,
     lcount: usize,
 }
@@ -137,13 +138,13 @@ impl CompilerTrait for Compiler {
         //
         // Convert the atom into a statement.
         //
-        let stmt = Statement::try_from(atom.clone())?;
+        let stmt = Statement::from_atom(atom.clone(), &self.macros)?;
         //
         // Wrap the statement in a main function definition.
         //
         let stmts = Statements::new(vec![stmt]);
-        let fdef = FunctionDefinition::new("main".into(), Arguments::None, stmts);
-        let topl = TopLevelStatement::FunctionDefinition(atom, fdef);
+        let fdef = FunctionDefinition::new("__eval__".into(), Arguments::None, stmts);
+        let topl = TopLevelStatement::Function(atom, fdef);
         //
         // Load the top-level statement.
         //
@@ -155,7 +156,7 @@ impl CompilerTrait for Compiler {
         //
         // Build the virtual machine.
         //
-        let mut vm = VirtualMachine::new(1024, false);
+        let mut vm = VirtualMachine::new("__eval__", 1024, false);
         //
         // Run.
         //
@@ -167,14 +168,15 @@ impl CompilerTrait for Compiler {
     }
 
     fn load_atom(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
-        let stmt: TopLevelStatement = atom.try_into()?;
+        let stmt = TopLevelStatement::from_atom(atom, &self.macros)?;
         self.load_statement(stmt)
     }
 
     fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
         match stmt {
-            TopLevelStatement::FunctionDefinition(_, v) => self.compile_defun(v),
-            TopLevelStatement::Load(_, v) => self.load_modules(v),
+            TopLevelStatement::Function(_, v) => self.compile_function(v, false),
+            TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
+            TopLevelStatement::Use(_, v) => self.load_modules(v),
         }
     }
 
@@ -390,15 +392,17 @@ impl Compiler {
         //
         let mut stmts: Vec<_> = atoms
             .into_iter()
-            .map(TopLevelStatement::try_from)
+            .map(|v| TopLevelStatement::from_atom(v, &self.macros))
             .collect::<Result<_, _>>()?;
         //
         // Filter function declarations.
         //
         if let Some(items) = _items {
             stmts.retain(|v| match v {
-                TopLevelStatement::FunctionDefinition(_, v) => items.contains(&v.name().as_ref()),
-                TopLevelStatement::Load(..) => true,
+                TopLevelStatement::Function(_, v) | TopLevelStatement::Macro(_, v) => {
+                    items.contains(&v.name().as_ref())
+                }
+                TopLevelStatement::Use(..) => true,
             });
         }
         //
@@ -413,7 +417,7 @@ impl Compiler {
 //
 
 impl Compiler {
-    fn compile_defun(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
+    fn compile_function(&mut self, defun: FunctionDefinition, is_macro: bool) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
         let mut ctxt = Context::new(arity);
@@ -463,6 +467,12 @@ impl Compiler {
         // Save the block.
         //
         self.blocks.push((defun.name().clone(), ctxt));
+        //
+        // Optionally mark the function as a macro.
+        //
+        if is_macro {
+            self.macros.insert(defun.name().clone());
+        }
         //
         // Done.
         //
@@ -710,6 +720,29 @@ impl Compiler {
                 //
                 Ok(())
             }
+            Statement::Expand(_, name, args) => {
+                //
+                // Clone the compiler state and unmark the macro.
+                //
+                let mut comp = self.clone();
+                comp.macros.remove(name);
+                //
+                // Quote the arguments.
+                //
+                let args = args.iter().rev().fold(Atom::nil(), |acc, v| {
+                    Atom::cons(Atom::cons(Atom::symbol("quote"), v.atom()), acc)
+                });
+                //
+                // Evaluate the macro.
+                //
+                let expr = Atom::cons(Atom::symbol(name), args);
+                let expn = comp.eval(expr)?;
+                //
+                // Compile the result.
+                //
+                let stmt = Statement::from_atom(expn, &self.macros)?;
+                self.compile_statement(ctxt, &stmt)
+            }
             Statement::Lambda(_, args, statements) => {
                 let mut next = Context::new(args.arity());
                 //
@@ -840,6 +873,7 @@ impl Compiler {
                     Operator::IsNil => OpCode::IsNil.into(),
                     Operator::IsSym => OpCode::IsSym.into(),
                     Operator::IsTru => OpCode::IsTru.into(),
+                    Operator::IsWld => OpCode::IsWld.into(),
                 };
                 //
                 // Push the opcode.
@@ -1154,6 +1188,7 @@ impl Compiler {
             Self::lift(Operator::IsNil),
             Self::lift(Operator::IsSym),
             Self::lift(Operator::IsTru),
+            Self::lift(Operator::IsWld),
         ];
         //
         // Compile the statements.
@@ -1164,6 +1199,7 @@ impl Compiler {
     fn lift(op: Operator) -> TopLevelStatement {
         let opname = op.to_string();
         let argcnt = op.arity();
+        let macros = HashSet::default();
         //
         // Build the argument list.
         //
@@ -1180,19 +1216,16 @@ impl Compiler {
         // Build the atom for the operator.
         //
         let atom = Atom::cons(
-            Atom::symbol("def"),
-            Atom::cons(
-                Atom::symbol(opname.as_str()),
-                Atom::cons(args, Atom::cons(apply, Atom::nil())),
-            ),
+            Atom::symbol(opname.as_str()),
+            Atom::cons(args, Atom::cons(apply, Atom::nil())),
         );
         //
         // Build the function definition.
         //
-        let defun = FunctionDefinition::try_from(atom.clone()).unwrap();
+        let defun = FunctionDefinition::from_atom(atom.clone(), &macros).unwrap();
         //
         // Done.
         //
-        TopLevelStatement::FunctionDefinition(atom, defun)
+        TopLevelStatement::Function(atom, defun)
     }
 }

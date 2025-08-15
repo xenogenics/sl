@@ -55,13 +55,22 @@ impl From<Immediate> for Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            //
+            // Handle wildcards.
+            //
+            (Value::Immediate(Immediate::Wildcard), _) => true,
+            (_, Value::Immediate(Immediate::Wildcard)) => true,
+            //
+            // Handle member equality.
+            //
             (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Heap(a), Value::Heap(b)) => a == b,
             (Value::Immediate(a), Value::Immediate(b)) => a == b,
             (Value::Link(a), Value::Link(b)) => a == b,
-            (Value::Immediate(Immediate::Wildcard), _) => true,
-            (_, Value::Immediate(Immediate::Wildcard)) => true,
-            (_, _) => false,
+            //
+            // Default.
+            //
+            _ => false,
         }
     }
 }

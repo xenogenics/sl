@@ -1,4 +1,4 @@
-(load '(iterators foldl))
+(use '(iterators foldl))
 
 (def test (value)
   (cond value

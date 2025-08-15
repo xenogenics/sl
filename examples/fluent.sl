@@ -1,4 +1,4 @@
-(load '(lang |>))
+(use '(lang |>))
 
 (def main ()
   "Validate the fluent operator."

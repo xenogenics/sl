@@ -1,4 +1,9 @@
-use std::{collections::BTreeSet, fmt::Display, rc::Rc, str::FromStr};
+use std::{
+    collections::{BTreeSet, HashSet},
+    fmt::Display,
+    rc::Rc,
+    str::FromStr,
+};
 
 use strum_macros::EnumString;
 
@@ -157,6 +162,8 @@ pub enum Operator {
     IsSym,
     #[strum(serialize = "tru?")]
     IsTru,
+    #[strum(serialize = "wld?")]
+    IsWld,
 }
 
 impl Operator {
@@ -183,6 +190,7 @@ impl Operator {
             Operator::IsNil => 1,
             Operator::IsSym => 1,
             Operator::IsTru => 1,
+            Operator::IsWld => 1,
         }
     }
 }
@@ -199,18 +207,6 @@ pub enum Value {
     Char(u8),
     Number(i64),
     Wildcard,
-}
-
-impl Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Nil => write!(f, "nil"),
-            Value::True => write!(f, "T"),
-            Value::Char(c) => write!(f, "{}", *c as char),
-            Value::Number(v) => write!(f, "{v}"),
-            Value::Wildcard => write!(f, "_"),
-        }
-    }
 }
 
 impl TryFrom<Rc<Atom>> for Value {
@@ -257,28 +253,11 @@ impl Backquote {
 }
 
 impl Backquote {
-    fn try_from_unquote(value: Rc<Atom>) -> Result<Self, Error> {
-        if let Atom::Pair(car, cdr) = value.as_ref()
-            && let Atom::Symbol(v) = car.as_ref()
-            && v.as_ref() == "unquote"
-        {
-            Statement::try_from(cdr.clone())
-                .map(Box::new)
-                .map(Self::Unquote)
-        } else {
-            Self::try_from(value)
-        }
-    }
-}
-
-impl TryFrom<Rc<Atom>> for Backquote {
-    type Error = Error;
-
-    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+    fn from_atom(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         match value.as_ref() {
             Atom::Pair(car, cdr) => {
-                let car = Self::try_from_unquote(car.clone())?;
-                let cdr = Self::try_from(cdr.clone())?;
+                let car = Self::from_unquote(car.clone(), macros)?;
+                let cdr = Self::from_unquote(cdr.clone(), macros)?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
             Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
@@ -287,6 +266,19 @@ impl TryFrom<Rc<Atom>> for Backquote {
             })),
             Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
+        }
+    }
+
+    fn from_unquote(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+        if let Atom::Pair(car, cdr) = value.as_ref()
+            && let Atom::Symbol(v) = car.as_ref()
+            && v.as_ref() == "unquote"
+        {
+            Statement::from_atom(cdr.clone(), macros)
+                .map(Box::new)
+                .map(Self::Unquote)
+        } else {
+            Self::from_atom(value, macros)
         }
     }
 }
@@ -372,6 +364,7 @@ pub enum Statement {
     // Function application.
     //
     Apply(Rc<Atom>, Box<Statement>, Statements, Location),
+    Expand(Rc<Atom>, Box<str>, Statements),
     Lambda(Rc<Atom>, Arguments, Statements),
     Operator(Rc<Atom>, Operator),
     SysCall(Rc<Atom>, Box<str>),
@@ -399,6 +392,23 @@ pub enum Statement {
 }
 
 impl Statement {
+    pub fn atom(&self) -> Rc<Atom> {
+        match self {
+            Statement::Apply(atom, ..)
+            | Statement::Expand(atom, ..)
+            | Statement::Lambda(atom, ..)
+            | Statement::Operator(atom, _)
+            | Statement::SysCall(atom, _)
+            | Statement::IfThenElse(atom, ..)
+            | Statement::Let(atom, ..)
+            | Statement::Prog(atom, _)
+            | Statement::Backquote(atom, _)
+            | Statement::Quote(atom, _)
+            | Statement::Symbol(atom, _)
+            | Statement::Value(atom, _) => atom.clone(),
+        }
+    }
+
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
             Statement::Apply(_, sym, stmts, _) => {
@@ -465,7 +475,22 @@ impl Statement {
         }
     }
 
-    fn from_pair(atom: Rc<Atom>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+        match atom.as_ref() {
+            Atom::Pair(..) => Self::from_pair(atom.clone(), macros),
+            Atom::String(_) => {
+                let val = Quote::try_from(atom.clone())?;
+                Ok(Self::Quote(atom, val))
+            }
+            Atom::Symbol(sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
+            _ => {
+                let val = Value::try_from(atom.clone())?;
+                Ok(Self::Value(atom, val))
+            }
+        }
+    }
+
+    fn from_pair(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         //
         // Split the atom.
         //
@@ -484,7 +509,7 @@ impl Statement {
                 // Quote: quasiquote.
                 //
                 "backquote" => {
-                    let val = Backquote::try_from(rem.clone())?;
+                    let val = Backquote::from_atom(rem.clone(), macros)?;
                     Ok(Self::Backquote(atom, val))
                 }
                 //
@@ -511,7 +536,7 @@ impl Statement {
                     //
                     // Parse the condition.
                     //
-                    let cond: Statement = cond.clone().try_into()?;
+                    let cond = Statement::from_atom(cond.clone(), macros)?;
                     //
                     // Unpack THEN.
                     //
@@ -521,14 +546,14 @@ impl Statement {
                     //
                     // Parse THEN.
                     //
-                    let then: Statement = then.clone().try_into()?;
+                    let then = Statement::from_atom(then.clone(), macros)?;
                     //
                     // Unpack ELSE.
                     //
                     let else_ = match args.as_ref() {
                         Atom::Nil => None,
                         Atom::Pair(else_, _) => {
-                            let v = Statement::try_from(else_.clone())?;
+                            let v = Statement::from_atom(else_.clone(), macros)?;
                             Some(Box::new(v))
                         }
                         _ => return Err(Error::ExpectedPair),
@@ -569,7 +594,7 @@ impl Statement {
                             //
                             // Parse the statement.
                             //
-                            let v: Statement = stmt.clone().try_into()?;
+                            let v = Statement::from_atom(stmt.clone(), macros)?;
                             //
                             // Done.
                             //
@@ -579,7 +604,7 @@ impl Statement {
                     //
                     // Parse the statements.
                     //
-                    let stmts: Statements = stmts.clone().try_into()?;
+                    let stmts = Statements::from_atom(stmts.clone(), macros)?;
                     //
                     // Done.
                     //
@@ -606,7 +631,7 @@ impl Statement {
                     //
                     // Build the statement list.
                     //
-                    let stmts: Statements = rem.clone().try_into()?;
+                    let stmts = Statements::from_atom(rem.clone(), macros)?;
                     //
                     // Done.
                     //
@@ -616,7 +641,7 @@ impl Statement {
                 // Prog.
                 //
                 "prog" => {
-                    let stmts: Statements = rem.clone().try_into()?;
+                    let stmts = Statements::from_atom(rem.clone(), macros)?;
                     Ok(Self::Prog(atom, stmts))
                 }
                 //
@@ -639,7 +664,7 @@ impl Statement {
                     // Build the statements.
                     //
                     let stmt = Box::new(Statement::SysCall(sym.clone(), name.clone()));
-                    let stmts: Statements = rem.clone().try_into()?;
+                    let stmts = Statements::from_atom(rem.clone(), macros)?;
                     //
                     // Done.
                     //
@@ -653,7 +678,7 @@ impl Statement {
                         //
                         // Process the arguments.
                         //
-                        let stmts: Statements = rem.clone().try_into()?;
+                        let stmts = Statements::from_atom(rem.clone(), macros)?;
                         //
                         // If there is enough arguments, generate an operator call.
                         //
@@ -670,9 +695,13 @@ impl Statement {
                         //
                         Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                     }
+                    Err(_) if macros.contains(v) => {
+                        let stmts = Statements::from_atom(rem.clone(), macros)?;
+                        Ok(Self::Expand(atom.clone(), name.clone(), stmts))
+                    }
                     Err(_) => {
                         let stmt = Box::new(Statement::Symbol(sym.clone(), name.clone()));
-                        let stmts: Statements = rem.clone().try_into()?;
+                        let stmts = Statements::from_atom(rem.clone(), macros)?;
                         Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                     }
                 },
@@ -681,8 +710,8 @@ impl Statement {
             // For any other type, evaluate the atom.
             //
             _ => {
-                let car = Box::new(Statement::try_from(sym.clone())?);
-                let cdr: Statements = rem.clone().try_into()?;
+                let car = Statement::from_atom(sym.clone(), macros).map(Box::new)?;
+                let cdr = Statements::from_atom(rem.clone(), macros)?;
                 Ok(Self::Apply(atom, car, cdr, Location::Any))
             }
         }
@@ -759,43 +788,6 @@ impl Statement {
     }
 }
 
-impl Display for Statement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Statement::Apply(atom, ..)
-            | Statement::Lambda(atom, ..)
-            | Statement::Operator(atom, ..)
-            | Statement::SysCall(atom, ..)
-            | Statement::IfThenElse(atom, ..)
-            | Statement::Let(atom, ..)
-            | Statement::Prog(atom, ..)
-            | Statement::Backquote(atom, ..)
-            | Statement::Quote(atom, ..)
-            | Statement::Symbol(atom, ..)
-            | Statement::Value(atom, ..) => write!(f, "{atom}"),
-        }
-    }
-}
-
-impl TryFrom<Rc<Atom>> for Statement {
-    type Error = Error;
-
-    fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
-        match atom.as_ref() {
-            Atom::Pair(..) => Self::from_pair(atom.clone()),
-            Atom::String(_) => {
-                let val = Quote::try_from(atom.clone())?;
-                Ok(Self::Quote(atom, val))
-            }
-            Atom::Symbol(sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
-            _ => {
-                let val = Value::try_from(atom.clone())?;
-                Ok(Self::Value(atom, val))
-            }
-        }
-    }
-}
-
 //
 // Statements.
 //
@@ -807,6 +799,13 @@ pub struct Statements(Vec<Statement>);
 impl Statements {
     pub fn new(stmts: Vec<Statement>) -> Self {
         Self(stmts)
+    }
+
+    pub fn atom(&self) -> Rc<Atom> {
+        self.0
+            .iter()
+            .rev()
+            .fold(Atom::nil(), |acc, v| Atom::cons(v.atom(), acc))
     }
 
     pub fn closure(&self) -> BTreeSet<Box<str>> {
@@ -847,21 +846,11 @@ impl Statements {
             .map(Statement::is_tail_call)
             .unwrap_or_default()
     }
-}
 
-impl Display for Statements {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.iter().try_for_each(|v| write!(f, " {v}"))
-    }
-}
-
-impl TryFrom<Rc<Atom>> for Statements {
-    type Error = Error;
-
-    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+    fn from_atom(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         let inner = value
             .into_iter()
-            .map(Statement::try_from)
+            .map(|v| Statement::from_atom(v, macros))
             .collect::<Result<_, Error>>()?;
         Ok(Self(inner))
     }
@@ -873,48 +862,68 @@ impl TryFrom<Rc<Atom>> for Statements {
 
 #[derive(Debug)]
 pub enum TopLevelStatement {
-    FunctionDefinition(Rc<Atom>, FunctionDefinition),
-    Load(Rc<Atom>, Statements),
+    Function(Rc<Atom>, FunctionDefinition),
+    Macro(Rc<Atom>, FunctionDefinition),
+    Use(Rc<Atom>, Statements),
 }
 
-impl Display for TopLevelStatement {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl TopLevelStatement {
+    pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
-            TopLevelStatement::FunctionDefinition(_, v) => write!(f, "{v}"),
-            TopLevelStatement::Load(_, v) => write!(f, "(load {v})"),
+            TopLevelStatement::Function(_, def) | TopLevelStatement::Macro(_, def) => def.closure(),
+            TopLevelStatement::Use(..) => Default::default(),
         }
     }
-}
 
-impl TryFrom<Rc<Atom>> for TopLevelStatement {
-    type Error = Error;
+    pub fn statements(&self) -> &Statements {
+        match self {
+            TopLevelStatement::Function(_, def) | TopLevelStatement::Macro(_, def) => {
+                def.statements()
+            }
+            TopLevelStatement::Use(_, stmts) => stmts,
+        }
+    }
 
-    fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
+    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         //
         // Split the function call.
         //
-        let Atom::Pair(a, b) = atom.as_ref() else {
+        let Atom::Pair(sym, rem) = atom.as_ref() else {
             return Err(Error::ExpectedFunctionCall);
         };
         //
         // Get the function symbol.
         //
-        let Atom::Symbol(symbol) = a.as_ref() else {
+        let Atom::Symbol(name) = sym.as_ref() else {
             return Err(Error::ExpectedSymbol);
         };
         //
         // Process the top-level statement.
         //
-        match symbol.as_ref() {
+        match name.as_ref() {
             "def" => {
-                let val = FunctionDefinition::try_from(atom.clone())?;
-                Ok(Self::FunctionDefinition(atom, val))
+                let val = FunctionDefinition::from_atom(rem.clone(), macros)?;
+                Ok(Self::Function(atom, val))
             }
-            "load" => {
-                let val = Statements::try_from(b.clone())?;
-                Ok(Self::Load(atom, val))
+            "mac" => {
+                let val = FunctionDefinition::from_atom(rem.clone(), macros)?;
+                Ok(Self::Macro(atom, val))
+            }
+            "use" => {
+                let val = Statements::from_atom(rem.clone(), macros)?;
+                Ok(Self::Use(atom, val))
             }
             _ => Err(Error::ExpectedTopLevelStatement),
+        }
+    }
+}
+
+impl Display for TopLevelStatement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TopLevelStatement::Function(atom, _)
+            | TopLevelStatement::Macro(atom, _)
+            | TopLevelStatement::Use(atom, _) => write!(f, "{atom}"),
         }
     }
 }
@@ -950,47 +959,12 @@ impl FunctionDefinition {
         });
         v
     }
-}
 
-impl Display for FunctionDefinition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "(def {} (", self.0)?;
-        for (i, v) in self.1.iter().enumerate() {
-            if i > 0 {
-                write!(f, " ")?;
-            }
-            write!(f, "{v}")?;
-        }
-        write!(f, "){})", self.2)
-    }
-}
-
-impl TryFrom<Rc<Atom>> for FunctionDefinition {
-    type Error = Error;
-
-    fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
-        //
-        // Split the function call.
-        //
-        let Atom::Pair(def, rem) = atom.as_ref() else {
-            return Err(Error::ExpectedFunctionCall);
-        };
-        //
-        // Get the function symbol.
-        //
-        let Atom::Symbol(symbol) = def.as_ref() else {
-            return Err(Error::ExpectedSymbol);
-        };
-        //
-        // Make sure we have a function definition.
-        //
-        if symbol.as_ref() != "def" {
-            return Err(Error::ExpectedFunctionDefinition);
-        }
+    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         //
         // Extract the function name.
         //
-        let Atom::Pair(name, rem) = rem.as_ref() else {
+        let Atom::Pair(name, rem) = atom.as_ref() else {
             return Err(Error::ExpectedPair);
         };
         //
@@ -1025,7 +999,7 @@ impl TryFrom<Rc<Atom>> for FunctionDefinition {
         //
         // Build the statement list.
         //
-        let mut stmts: Statements = rem.clone().try_into()?;
+        let mut stmts = Statements::from_atom(rem.clone(), macros)?;
         //
         // Identify tail calls.
         //

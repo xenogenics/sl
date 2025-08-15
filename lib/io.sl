@@ -1,4 +1,4 @@
-(load '(iterators iter))
+(use '(iterators iter))
 
 (def prinl LST
   "Print the string version of each element of LST."

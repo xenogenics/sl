@@ -99,6 +99,7 @@ pub enum OpCode {
     IsNum,
     IsSym,
     IsTru,
+    IsWld,
     //
     // Control flow.
     //

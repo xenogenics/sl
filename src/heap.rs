@@ -22,11 +22,20 @@ impl Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            //
+            // Handle wildcards.
+            //
+            (Value::Immediate(Immediate::Wildcard), _) => true,
+            (_, Value::Immediate(Immediate::Wildcard)) => true,
+            //
+            // Handle member equality.
+            //
             (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Immediate(a), Value::Immediate(b)) => a == b,
             (Value::Pair(car0, cdr0), Value::Pair(car1, cdr1)) => car0 == car1 && cdr0 == cdr1,
-            (Value::Immediate(Immediate::Wildcard), _) => true,
-            (_, Value::Immediate(Immediate::Wildcard)) => true,
+            //
+            // Default.
+            //
             _ => false,
         }
     }

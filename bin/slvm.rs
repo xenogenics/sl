@@ -39,7 +39,7 @@ fn main() -> Result<(), Error> {
     //
     // Build the virtual machine.
     //
-    let mut vm = VirtualMachine::new(args.stack_size, args.trace);
+    let mut vm = VirtualMachine::new("main", args.stack_size, args.trace);
     //
     // Run the binary.
     //
