@@ -242,7 +242,7 @@ pub enum Location {
 // Backquote.
 //
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Backquote {
     Pair(Box<Backquote>, Box<Backquote>),
     Symbol(Box<str>),
@@ -366,60 +366,65 @@ impl<'a> std::iter::Iterator for QuoteIterator<'a> {
 // Statement.
 //
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Statement {
     //
     // Function application.
     //
-    Apply(Box<Statement>, Statements, Location),
-    Lambda(Arguments, Statements),
-    Operator(Operator),
-    SysCall(Box<str>),
+    Apply(Rc<Atom>, Box<Statement>, Statements, Location),
+    Lambda(Rc<Atom>, Arguments, Statements),
+    Operator(Rc<Atom>, Operator),
+    SysCall(Rc<Atom>, Box<str>),
     //
     // Control structures.
     //
-    IfThenElse(Box<Statement>, Box<Statement>, Option<Box<Statement>>),
-    Let(Vec<(Box<str>, Statement)>, Statements),
-    Prog(Statements),
+    IfThenElse(
+        Rc<Atom>,
+        Box<Statement>,
+        Box<Statement>,
+        Option<Box<Statement>>,
+    ),
+    Let(Rc<Atom>, Vec<(Box<str>, Statement)>, Statements),
+    Prog(Rc<Atom>, Statements),
     //
     // Quotes.
     //
-    Backquote(Backquote),
-    Quote(Quote),
+    Backquote(Rc<Atom>, Backquote),
+    Quote(Rc<Atom>, Quote),
     //
     // Symbol & value.
     //
-    Symbol(Box<str>),
-    Value(Value),
+    Symbol(Rc<Atom>, Box<str>),
+    Value(Rc<Atom>, Value),
 }
 
 impl Statement {
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
-            Statement::Apply(sym, stmts, _) => {
+            Statement::Apply(_, sym, stmts, _) => {
                 let mut v = sym.closure();
                 v.extend(stmts.closure());
                 v
             }
-            Statement::Lambda(args, stmts) => {
+            Statement::Lambda(_, args, stmts) => {
                 let mut v = stmts.closure();
                 args.iter().for_each(|s| {
                     v.remove(s);
                 });
                 v
             }
-            Statement::IfThenElse(cond, then, None) => {
+            Statement::IfThenElse(_, cond, then, None) => {
                 let mut v = cond.closure();
                 v.extend(then.closure());
                 v
             }
-            Statement::IfThenElse(cond, then, Some(else_)) => {
+            Statement::IfThenElse(_, cond, then, Some(else_)) => {
                 let mut v = cond.closure();
                 v.extend(then.closure());
                 v.extend(else_.closure());
                 v
             }
-            Statement::Let(bindings, stmts) => {
+            Statement::Let(_, bindings, stmts) => {
                 let mut args = BTreeSet::new();
                 //
                 // Compute the closure for the bindings.
@@ -451,7 +456,7 @@ impl Statement {
                 //
                 v
             }
-            Statement::Symbol(sym) => {
+            Statement::Symbol(_, sym) => {
                 let mut v = BTreeSet::new();
                 v.insert(sym.clone());
                 v
@@ -460,23 +465,35 @@ impl Statement {
         }
     }
 
-    fn from_pair(atom: Rc<Atom>, rem: Rc<Atom>) -> Result<Self, Error> {
+    fn from_pair(atom: Rc<Atom>) -> Result<Self, Error> {
+        //
+        // Split the atom.
+        //
+        let Atom::Pair(sym, rem) = atom.as_ref() else {
+            unreachable!();
+        };
         //
         // Process the atom.
         //
-        match atom.as_ref() {
+        match sym.as_ref() {
             //
             // For symbols, check its value for built-ins.
             //
-            Atom::Symbol(sym) => match sym.as_ref() {
+            Atom::Symbol(name) => match name.as_ref() {
                 //
                 // Quote: quasiquote.
                 //
-                "backquote" => Backquote::try_from(rem).map(Self::Backquote),
+                "backquote" => {
+                    let val = Backquote::try_from(rem.clone())?;
+                    Ok(Self::Backquote(atom, val))
+                }
                 //
                 // Quote: quote.
                 //
-                "quote" => Quote::try_from(rem).map(Self::Quote),
+                "quote" => {
+                    let val = Quote::try_from(rem.clone())?;
+                    Ok(Self::Quote(atom, val))
+                }
                 //
                 // Quote: unquote.
                 //
@@ -519,266 +536,7 @@ impl Statement {
                     //
                     // Done.
                     //
-                    Ok(Self::IfThenElse(cond.into(), then.into(), else_))
-                }
-                //
-                // Control flow: cond.
-                //
-                "cond" => {
-                    //
-                    // Unpack the value expression.
-                    //
-                    let Atom::Pair(value, cases) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse the value.
-                    //
-                    let value: Statement = value.clone().try_into()?;
-                    //
-                    // Expand the cases into a reversable collection.
-                    //
-                    let cases: Vec<_> = cases.iter().collect();
-                    //
-                    // Find the index of the catch-all statement, if any.
-                    //
-                    let catchall_index = cases
-                        .iter()
-                        .position(|e| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(cond, _) = e.as_ref() else {
-                                return false;
-                            };
-                            //
-                            // Check the condition.
-                            //
-                            matches!(cond.as_ref(), &Atom::Wildcard)
-                        })
-                        .unwrap_or(cases.len());
-
-                    //
-                    // Parse the catch-all statement.
-                    //
-                    let catchall_stmt = cases
-                        .get(catchall_index)
-                        .map(|atom| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(_, expr) = atom.as_ref() else {
-                                return Err(Error::ExpectedPair);
-                            };
-                            //
-                            // Parse the statement.
-                            //
-                            Statement::try_from(expr.clone()).map(Box::new)
-                        })
-                        .transpose()?;
-                    //
-                    // Build the value symbol.
-                    //
-                    let vsym = Statement::Symbol("#COND#".into());
-                    //
-                    // Process the cases up to the catch-all statement.
-                    //
-                    let ift = cases[0..catchall_index].iter().rev().try_fold(
-                        catchall_stmt,
-                        |else_, case| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(cond, expr) = case.as_ref() else {
-                                return Err(Error::ExpectedPair);
-                            };
-                            //
-                            // Parse the condition.
-                            //
-                            let stmt: Statement = cond.clone().try_into()?;
-                            //
-                            // Build the condition evaluation.
-                            //
-                            let cond = Self::Apply(
-                                stmt.into(),
-                                Statements::new(vec![vsym.clone()]),
-                                Location::Any,
-                            );
-                            //
-                            // Parse the expression.
-                            //
-                            let then: Statement = expr.clone().try_into()?;
-                            //
-                            // Build the case statement.
-                            //
-                            Ok(Some(Box::new(Self::IfThenElse(
-                                cond.into(),
-                                then.into(),
-                                else_,
-                            ))))
-                        },
-                    )?;
-                    //
-                    // Extract the statement.
-                    //
-                    let stmt = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
-                    //
-                    // Wrap into a let binding.
-                    //
-                    let bindings = vec![("#COND#".into(), value)];
-                    let result = Statement::Let(bindings, Statements::new(vec![stmt]));
-                    //
-                    // Done.
-                    //
-                    Ok(result)
-                }
-                //
-                // Control flow: match.
-                //
-                "match" => {
-                    //
-                    // Unpack the value expression.
-                    //
-                    let Atom::Pair(value, cases) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse the value.
-                    //
-                    let value: Statement = value.clone().try_into()?;
-                    //
-                    // Expand the cases into a reversable collection.
-                    //
-                    let cases: Vec<_> = cases.iter().collect();
-                    //
-                    // Find the index of the catch-all statement, if any.
-                    //
-                    let catchall_index = cases
-                        .iter()
-                        .position(|e| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(cond, _) = e.as_ref() else {
-                                return false;
-                            };
-                            //
-                            // Check the condition.
-                            //
-                            matches!(cond.as_ref(), &Atom::Wildcard)
-                        })
-                        .unwrap_or(cases.len());
-
-                    //
-                    // Parse the catch-all statement.
-                    //
-                    let catchall_stmt = cases
-                        .get(catchall_index)
-                        .map(|atom| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(_, expr) = atom.as_ref() else {
-                                return Err(Error::ExpectedPair);
-                            };
-                            //
-                            // Parse the statement.
-                            //
-                            Statement::try_from(expr.clone()).map(Box::new)
-                        })
-                        .transpose()?;
-                    //
-                    // Build the value symbol.
-                    //
-                    let vsym = Statement::Symbol("#MATCH#".into());
-                    //
-                    // Process the cases up to the catch-all statement.
-                    //
-                    let ift = cases[0..catchall_index].iter().rev().try_fold(
-                        catchall_stmt,
-                        |else_, case| {
-                            //
-                            // Split the atom.
-                            //
-                            let Atom::Pair(tmpl, expr) = case.as_ref() else {
-                                return Err(Error::ExpectedPair);
-                            };
-                            //
-                            // Parse the template.
-                            //
-                            let tmpl = Quote::try_from(tmpl.clone()).map(Statement::Quote)?;
-                            //
-                            // Build the condition evaluation.
-                            //
-                            let cond = Self::Apply(
-                                Statement::Operator(Operator::Equ).into(),
-                                Statements::new(vec![tmpl, vsym.clone()]),
-                                Location::Any,
-                            );
-                            //
-                            // Parse the expression.
-                            //
-                            let then: Statement = expr.clone().try_into()?;
-                            //
-                            // Build the case statement.
-                            //
-                            Ok(Some(Box::new(Self::IfThenElse(
-                                cond.into(),
-                                then.into(),
-                                else_,
-                            ))))
-                        },
-                    )?;
-                    //
-                    // Extract the statement.
-                    //
-                    let stmt = ift.as_deref().cloned().unwrap_or(Self::Value(Value::Nil));
-                    //
-                    // Wrap into a let binding.
-                    //
-                    let bindings = vec![("#MATCH#".into(), value)];
-                    let result = Statement::Let(bindings, Statements::new(vec![stmt]));
-                    //
-                    // Done.
-                    //
-                    Ok(result)
-                }
-                //
-                // Control flow: unless.
-                //
-                "unless" => {
-                    //
-                    // Unpack the condition.
-                    //
-                    let Atom::Pair(cond, args) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse the condition.
-                    //
-                    let cond: Statement = cond.clone().try_into()?;
-                    //
-                    // Invert the condition.
-                    //
-                    let cond = Statement::Apply(
-                        Statement::Operator(Operator::Not).into(),
-                        Statements::new(vec![cond]),
-                        Location::Any,
-                    );
-                    //
-                    // Unpack statement.
-                    //
-                    let Atom::Pair(stmt, _) = args.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Parse the statement.
-                    //
-                    let stmt: Statement = stmt.clone().try_into()?;
-                    //
-                    // Done.
-                    //
-                    Ok(Self::IfThenElse(cond.into(), stmt.into(), None))
+                    Ok(Self::IfThenElse(atom, cond.into(), then.into(), else_))
                 }
                 //
                 // Value binding: let.
@@ -825,7 +583,7 @@ impl Statement {
                     //
                     // Done.
                     //
-                    Ok(Self::Let(bindings, stmts))
+                    Ok(Self::Let(atom, bindings, stmts))
                 }
                 //
                 // Function definition are forbidden.
@@ -852,14 +610,14 @@ impl Statement {
                     //
                     // Done.
                     //
-                    Ok(Self::Lambda(args, stmts))
+                    Ok(Self::Lambda(atom, args, stmts))
                 }
                 //
                 // Prog.
                 //
                 "prog" => {
                     let stmts: Statements = rem.clone().try_into()?;
-                    Ok(Self::Prog(stmts))
+                    Ok(Self::Prog(atom, stmts))
                 }
                 //
                 // System call.
@@ -874,24 +632,24 @@ impl Statement {
                     //
                     // Make sure the first argument is a symbol
                     //
-                    let Atom::Symbol(sym) = sym.as_ref() else {
+                    let Atom::Symbol(name) = sym.as_ref() else {
                         return Err(Error::ExpectedSymbol);
                     };
                     //
                     // Build the statements.
                     //
-                    let stmt = Box::new(Statement::SysCall(sym.clone()));
+                    let stmt = Box::new(Statement::SysCall(sym.clone(), name.clone()));
                     let stmts: Statements = rem.clone().try_into()?;
                     //
                     // Done.
                     //
-                    Ok(Self::Apply(stmt, stmts, Location::Any))
+                    Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                 }
                 //
                 // Other symbols.
                 //
                 v => match Operator::from_str(v) {
-                    Ok(v) => {
+                    Ok(op) => {
                         //
                         // Process the arguments.
                         //
@@ -899,23 +657,23 @@ impl Statement {
                         //
                         // If there is enough arguments, generate an operator call.
                         //
-                        let stmt = if stmts.len() >= v.arity() {
-                            Box::new(Statement::Operator(v))
+                        let stmt = if stmts.len() >= op.arity() {
+                            Box::new(Statement::Operator(Atom::symbol(v), op))
                         }
                         //
                         // Otherwise, generate a symbol call.
                         else {
-                            Box::new(Statement::Symbol(sym.clone()))
+                            Box::new(Statement::Symbol(sym.clone(), name.clone()))
                         };
                         //
                         // Done.
                         //
-                        Ok(Self::Apply(stmt, stmts, Location::Any))
+                        Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                     }
                     Err(_) => {
-                        let stmt = Box::new(Statement::Symbol(sym.clone()));
+                        let stmt = Box::new(Statement::Symbol(sym.clone(), name.clone()));
                         let stmts: Statements = rem.clone().try_into()?;
-                        Ok(Self::Apply(stmt, stmts, Location::Any))
+                        Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                     }
                 },
             },
@@ -923,33 +681,33 @@ impl Statement {
             // For any other type, evaluate the atom.
             //
             _ => {
-                let car = Box::new(Statement::try_from(atom.clone())?);
+                let car = Box::new(Statement::try_from(sym.clone())?);
                 let cdr: Statements = rem.clone().try_into()?;
-                Ok(Self::Apply(car, cdr, Location::Any))
+                Ok(Self::Apply(atom, car, cdr, Location::Any))
             }
         }
     }
 
     pub fn statements(&self) -> Box<dyn std::iter::Iterator<Item = &Statement> + '_> {
         match self {
-            Statement::Apply(statement, statements, _) => {
+            Statement::Apply(_, statement, statements, _) => {
                 let iter = Some(statement.as_ref())
                     .into_iter()
                     .chain(statements.iter());
                 Box::new(iter)
             }
-            Statement::Lambda(_, statements) => {
+            Statement::Lambda(_, _, statements) => {
                 let iter = statements.iter();
                 Box::new(iter)
             }
-            Statement::IfThenElse(statement, then, else_) => {
+            Statement::IfThenElse(_, statement, then, else_) => {
                 let iter = Some(statement.as_ref())
                     .into_iter()
                     .chain(then.statements())
                     .chain(else_.iter().flat_map(|v| v.statements()));
                 Box::new(iter)
             }
-            Statement::Let(bindings, statements) => {
+            Statement::Let(_, bindings, statements) => {
                 let iter = bindings
                     .iter()
                     .flat_map(|(_, v)| v.statements())
@@ -962,14 +720,14 @@ impl Statement {
 
     fn identify_tail_calls(&mut self, name: &str) {
         match self {
-            Statement::Apply(stmt, _, location) => {
-                if let Statement::Symbol(v) = stmt.as_ref()
+            Statement::Apply(_, stmt, _, location) => {
+                if let Statement::Symbol(_, v) = stmt.as_ref()
                     && name == v.as_ref()
                 {
                     *location = Location::Tail;
                 }
             }
-            Statement::IfThenElse(_, then, else_) => {
+            Statement::IfThenElse(_, _, then, else_) => {
                 //
                 // Process THEN.
                 //
@@ -981,15 +739,15 @@ impl Statement {
                     else_.identify_tail_calls(name);
                 }
             }
-            Statement::Let(_, stmts) => stmts.identify_tail_calls(name),
+            Statement::Let(_, _, stmts) => stmts.identify_tail_calls(name),
             _ => (),
         }
     }
 
     pub fn is_tail_call(&self) -> bool {
         match self {
-            Statement::Apply(_, _, Location::Tail) => true,
-            Statement::IfThenElse(_, then, else_) => {
+            Statement::Apply(_, _, _, Location::Tail) => true,
+            Statement::IfThenElse(_, _, then, else_) => {
                 then.is_tail_call()
                     && else_
                         .as_deref()
@@ -1004,45 +762,17 @@ impl Statement {
 impl Display for Statement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Statement::Apply(statement, statements, _) => {
-                write!(f, "({statement}")?;
-                write!(f, "{statements}")?;
-                write!(f, ")")
-            }
-            Statement::Lambda(args, statements) => {
-                write!(f, "(\\ (")?;
-                for (i, v) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{v}")?;
-                }
-                write!(f, ")")?;
-                write!(f, "{statements}")?;
-                write!(f, ")")
-            }
-            Statement::Operator(v) => write!(f, "{v}"),
-            Statement::SysCall(sym) => write!(f, "(syscall {sym})"),
-            Statement::IfThenElse(cond, then, None) => {
-                write!(f, "(if {cond} {then})")
-            }
-            Statement::IfThenElse(cond, then, Some(else_)) => {
-                write!(f, "(if {cond} {then} {else_})")
-            }
-            Statement::Let(bindings, statements) => {
-                write!(f, "(let (")?;
-                bindings
-                    .iter()
-                    .try_for_each(|(k, v)| write!(f, "({k} . {v})"))?;
-                write!(f, ")")?;
-                write!(f, "{statements}")?;
-                write!(f, ")")
-            }
-            Statement::Prog(stmts) => write!(f, "(prog {stmts})"),
-            Statement::Backquote(_) => write!(f, "`(..)"),
-            Statement::Quote(_) => write!(f, "'(..)"),
-            Statement::Symbol(value) => write!(f, "{value}"),
-            Statement::Value(value) => write!(f, "{value}"),
+            Statement::Apply(atom, ..)
+            | Statement::Lambda(atom, ..)
+            | Statement::Operator(atom, ..)
+            | Statement::SysCall(atom, ..)
+            | Statement::IfThenElse(atom, ..)
+            | Statement::Let(atom, ..)
+            | Statement::Prog(atom, ..)
+            | Statement::Backquote(atom, ..)
+            | Statement::Quote(atom, ..)
+            | Statement::Symbol(atom, ..)
+            | Statement::Value(atom, ..) => write!(f, "{atom}"),
         }
     }
 }
@@ -1052,10 +782,16 @@ impl TryFrom<Rc<Atom>> for Statement {
 
     fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
         match atom.as_ref() {
-            Atom::Pair(atom, rem) => Self::from_pair(atom.clone(), rem.clone()),
-            Atom::String(_) => Quote::try_from(atom).map(Self::Quote),
-            Atom::Symbol(sym) => Ok(Self::Symbol(sym.clone())),
-            _ => Value::try_from(atom).map(Self::Value),
+            Atom::Pair(..) => Self::from_pair(atom.clone()),
+            Atom::String(_) => {
+                let val = Quote::try_from(atom.clone())?;
+                Ok(Self::Quote(atom, val))
+            }
+            Atom::Symbol(sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
+            _ => {
+                let val = Value::try_from(atom.clone())?;
+                Ok(Self::Value(atom, val))
+            }
         }
     }
 }
@@ -1064,7 +800,7 @@ impl TryFrom<Rc<Atom>> for Statement {
 // Statements.
 //
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct Statements(Vec<Statement>);
 
@@ -1137,15 +873,15 @@ impl TryFrom<Rc<Atom>> for Statements {
 
 #[derive(Debug)]
 pub enum TopLevelStatement {
-    FunctionDefinition(FunctionDefinition),
-    Load(Statements),
+    FunctionDefinition(Rc<Atom>, FunctionDefinition),
+    Load(Rc<Atom>, Statements),
 }
 
 impl Display for TopLevelStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TopLevelStatement::FunctionDefinition(v) => write!(f, "{v}"),
-            TopLevelStatement::Load(v) => write!(f, "(load {v})"),
+            TopLevelStatement::FunctionDefinition(_, v) => write!(f, "{v}"),
+            TopLevelStatement::Load(_, v) => write!(f, "(load {v})"),
         }
     }
 }
@@ -1170,8 +906,14 @@ impl TryFrom<Rc<Atom>> for TopLevelStatement {
         // Process the top-level statement.
         //
         match symbol.as_ref() {
-            "def" => FunctionDefinition::try_from(atom).map(Self::FunctionDefinition),
-            "load" => b.clone().try_into().map(Self::Load),
+            "def" => {
+                let val = FunctionDefinition::try_from(atom.clone())?;
+                Ok(Self::FunctionDefinition(atom, val))
+            }
+            "load" => {
+                let val = Statements::try_from(b.clone())?;
+                Ok(Self::Load(atom, val))
+            }
             _ => Err(Error::ExpectedTopLevelStatement),
         }
     }
@@ -1181,7 +923,7 @@ impl TryFrom<Rc<Atom>> for TopLevelStatement {
 // Function definition.
 //
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct FunctionDefinition(Box<str>, Arguments, Statements);
 
 impl FunctionDefinition {

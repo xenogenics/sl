@@ -137,15 +137,13 @@ impl CompilerTrait for Compiler {
         //
         // Convert the atom into a statement.
         //
-        let stmt = Statement::try_from(atom)?;
+        let stmt = Statement::try_from(atom.clone())?;
         //
         // Wrap the statement in a main function definition.
         //
-        let topl = TopLevelStatement::FunctionDefinition(FunctionDefinition::new(
-            "main".into(),
-            Arguments::None,
-            Statements::new(vec![stmt]),
-        ));
+        let stmts = Statements::new(vec![stmt]);
+        let fdef = FunctionDefinition::new("main".into(), Arguments::None, stmts);
+        let topl = TopLevelStatement::FunctionDefinition(atom, fdef);
         //
         // Load the top-level statement.
         //
@@ -175,8 +173,8 @@ impl CompilerTrait for Compiler {
 
     fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
         match stmt {
-            TopLevelStatement::FunctionDefinition(v) => self.compile_defun(v),
-            TopLevelStatement::Load(v) => self.load_modules(v),
+            TopLevelStatement::FunctionDefinition(_, v) => self.compile_defun(v),
+            TopLevelStatement::Load(_, v) => self.load_modules(v),
         }
     }
 
@@ -329,7 +327,7 @@ impl Compiler {
             //
             // Grab the quote.
             //
-            let Statement::Quote(quote) = v else {
+            let Statement::Quote(_, quote) = v else {
                 return Err(Error::ExpectedQuote);
             };
             //
@@ -399,8 +397,8 @@ impl Compiler {
         //
         if let Some(items) = _items {
             stmts.retain(|v| match v {
-                TopLevelStatement::FunctionDefinition(v) => items.contains(&v.name().as_ref()),
-                TopLevelStatement::Load(_) => true,
+                TopLevelStatement::FunctionDefinition(_, v) => items.contains(&v.name().as_ref()),
+                TopLevelStatement::Load(..) => true,
             });
         }
         //
@@ -552,7 +550,7 @@ impl Compiler {
         stmt: &Statement,
     ) -> Result<(), Error> {
         match stmt {
-            Statement::Apply(op, args, Location::Any) => {
+            Statement::Apply(_, op, args, Location::Any) => {
                 //
                 // Compile the arguments.
                 //
@@ -565,7 +563,7 @@ impl Compiler {
                 // If the operator is not internal, generate a call.
                 //
                 match op.as_ref() {
-                    Statement::Operator(_) => (),
+                    Statement::Operator(..) => (),
                     _ => ctxt.stream.push_back(OpCode::Call(args.len()).into()),
                 }
                 //
@@ -577,11 +575,11 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Apply(op, args, Location::Tail) => {
+            Statement::Apply(_, op, args, Location::Tail) => {
                 //
                 // Get the symbol of the tail call.
                 //
-                let Statement::Symbol(symbol) = op.as_ref() else {
+                let Statement::Symbol(_, symbol) = op.as_ref() else {
                     return Err(Error::ExpectedSymbol);
                 };
                 //
@@ -712,7 +710,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Lambda(args, statements) => {
+            Statement::Lambda(_, args, statements) => {
                 let mut next = Context::new(args.arity());
                 //
                 // Generate a name for the lambda.
@@ -801,7 +799,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Operator(v) => {
+            Statement::Operator(_, v) => {
                 //
                 // Get the opcode for the operator.
                 //
@@ -856,7 +854,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::SysCall(sym) => {
+            Statement::SysCall(_, sym) => {
                 //
                 // Get the syscall parameters.
                 //
@@ -875,7 +873,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::IfThenElse(cond, then, else_) => {
+            Statement::IfThenElse(_, cond, then, else_) => {
                 //
                 // Compile the condition.
                 //
@@ -918,7 +916,10 @@ impl Compiler {
                 //
                 match else_ {
                     Some(else_) => self.compile_statement(ctxt, else_)?,
-                    None => self.compile_statement(ctxt, &Statement::Value(Value::Nil))?,
+                    None => {
+                        let value = Statement::Value(Atom::nil(), Value::Nil);
+                        self.compile_statement(ctxt, &value)?
+                    }
                 }
                 //
                 // Track the label.
@@ -930,7 +931,7 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Let(bindings, statements) => {
+            Statement::Let(_, bindings, statements) => {
                 let argcnt = bindings.len();
                 //
                 // Compile the bindings.
@@ -956,11 +957,11 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Prog(stmts) => self.compile_statements(ctxt, stmts),
-            Statement::Backquote(quote) => self.compile_backquote(ctxt, quote),
-            Statement::Quote(quote) => Self::compile_quote(ctxt, quote),
-            Statement::Symbol(symbol) => self.compile_symbol(ctxt, symbol),
-            Statement::Value(value) => Self::compile_value(ctxt, value),
+            Statement::Prog(_, stmts) => self.compile_statements(ctxt, stmts),
+            Statement::Backquote(_, quote) => self.compile_backquote(ctxt, quote),
+            Statement::Quote(_, quote) => Self::compile_quote(ctxt, quote),
+            Statement::Symbol(_, symbol) => self.compile_symbol(ctxt, symbol),
+            Statement::Value(_, value) => Self::compile_value(ctxt, value),
         }
     }
 
@@ -1161,36 +1162,37 @@ impl Compiler {
     }
 
     fn lift(op: Operator) -> TopLevelStatement {
+        let opname = op.to_string();
         let argcnt = op.arity();
         //
         // Build the argument list.
         //
-        let args: Vec<_> = (0..argcnt)
-            .map(|v| format!("_{v}").into_boxed_str())
-            .collect();
+        let args = (0..argcnt).rev().fold(Atom::nil(), |acc, v| {
+            let name = format!("_{v}");
+            let symb = Atom::symbol(name.as_str());
+            Atom::cons(symb, acc)
+        });
         //
-        // Build the application.
+        // Build the apply statement.
         //
-        let apply = Statement::Apply(
-            Statement::Operator(op).into(),
-            Statements::new(args.clone().into_iter().map(Statement::Symbol).collect()),
-            Location::Any,
+        let apply = Atom::cons(Atom::symbol(opname.as_str()), args.clone());
+        //
+        // Build the atom for the operator.
+        //
+        let atom = Atom::cons(
+            Atom::symbol("def"),
+            Atom::cons(
+                Atom::symbol(opname.as_str()),
+                Atom::cons(args, Atom::cons(apply, Atom::nil())),
+            ),
         );
-        //
-        // Build the statements.
-        //
-        let stmts = Statements::new(vec![apply]);
         //
         // Build the function definition.
         //
-        let defun = FunctionDefinition::new(
-            op.to_string().into_boxed_str(),
-            Arguments::List(args),
-            stmts,
-        );
+        let defun = FunctionDefinition::try_from(atom.clone()).unwrap();
         //
         // Done.
         //
-        TopLevelStatement::FunctionDefinition(defun)
+        TopLevelStatement::FunctionDefinition(atom, defun)
     }
 }
