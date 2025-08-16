@@ -738,6 +738,12 @@ impl Compiler {
                 let expr = Atom::cons(Atom::symbol(name), args);
                 let expn = comp.eval(expr)?;
                 //
+                // Check if the result is valid.
+                //
+                if expn.is_nil() {
+                    return Err(Error::MacroExpansion(name.clone()));
+                }
+                //
                 // Compile the result.
                 //
                 let stmt = Statement::from_atom(expn, &self.macros)?;

@@ -42,6 +42,8 @@ pub enum Error {
     InvalidSystemCall(Box<str>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("Macro expansion failed: {0}")]
+    MacroExpansion(Box<str>),
     #[error("Main endpoint not defined")]
     MainNotDefined,
     #[cfg(test)]
