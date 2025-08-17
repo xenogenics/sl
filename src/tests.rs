@@ -4,7 +4,6 @@ use crate::{
     atom::Atom,
     compiler::{CompilerTrait, SymbolsAndOpCodes},
     error::Error,
-    ir::TopLevelStatement,
 };
 
 //
@@ -19,11 +18,7 @@ impl CompilerTrait for NullCompiler {
         Err(Error::NotSupported)
     }
 
-    fn load_atom(&mut self, _: Rc<Atom>) -> Result<(), Error> {
-        Ok(())
-    }
-
-    fn load_statement(&mut self, _: TopLevelStatement) -> Result<(), Error> {
+    fn load(&mut self, _: Rc<Atom>) -> Result<(), Error> {
         Ok(())
     }
 

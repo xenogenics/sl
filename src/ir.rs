@@ -272,11 +272,17 @@ impl Backquote {
     fn from_unquote(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         if let Atom::Pair(car, cdr) = value.as_ref()
             && let Atom::Symbol(v) = car.as_ref()
-            && v.as_ref() == "unquote"
         {
-            Statement::from_atom(cdr.clone(), macros)
-                .map(Box::new)
-                .map(Self::Unquote)
+            match v.as_ref() {
+                "backquote" => {
+                    let value = Atom::cons(Atom::symbol("quote"), cdr.clone());
+                    Self::from_atom(value, macros)
+                }
+                "unquote" => Statement::from_atom(cdr.clone(), macros)
+                    .map(Box::new)
+                    .map(Self::Unquote),
+                _ => Self::from_atom(value, macros),
+            }
         } else {
             Self::from_atom(value, macros)
         }

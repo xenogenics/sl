@@ -103,8 +103,7 @@ pub type SymbolsAndOpCodes = (Vec<(Box<str>, usize, Arity)>, OpCodes);
 
 pub trait CompilerTrait: Clone {
     fn eval(self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error>;
-    fn load_atom(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
-    fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error>;
+    fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
     fn compile(self) -> Result<SymbolsAndOpCodes, Error>;
 }
 
@@ -167,17 +166,9 @@ impl CompilerTrait for Compiler {
         result.try_into()
     }
 
-    fn load_atom(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
+    fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
         let stmt = TopLevelStatement::from_atom(atom, &self.macros)?;
         self.load_statement(stmt)
-    }
-
-    fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
-        match stmt {
-            TopLevelStatement::Function(_, v) => self.compile_function(v, false),
-            TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
-            TopLevelStatement::Use(_, v) => self.load_modules(v),
-        }
     }
 
     fn compile(self) -> Result<SymbolsAndOpCodes, Error> {
@@ -316,6 +307,20 @@ impl Compiler {
         // Done.
         //
         Ok(Some(result))
+    }
+}
+
+//
+// Statement loading.
+//
+
+impl Compiler {
+    fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
+        match stmt {
+            TopLevelStatement::Function(_, v) => self.compile_function(v, false),
+            TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
+            TopLevelStatement::Use(_, v) => self.load_modules(v),
+        }
     }
 }
 
