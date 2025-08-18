@@ -159,7 +159,22 @@ impl VirtualMachine {
                     };
                     self.stack.push(result);
                 }
+                OpCode::Conc => match (self.stack.pop(), self.stack.pop()) {
+                    (Value::Heap(a), b) => {
+                        let b = match b {
+                            Value::Closure(v) => Rc::new(heap::Value::Closure(v)),
+                            Value::Heap(v) => v,
+                            Value::Immediate(v) => Rc::new(heap::Value::Immediate(v)),
+                            _ => panic!("Return link cannot be pushed to the heap"),
+                        };
+                        self.stack.push(Value::Heap(heap::Value::conc(a, b)));
+                    }
+                    (_, b) => self.stack.push(b),
+                },
                 OpCode::Cons => {
+                    //
+                    // Move the arguments to the heap.
+                    //
                     let (a, b) = match (self.stack.pop(), self.stack.pop()) {
                         (Value::Closure(a), Value::Closure(b)) => {
                             let a = Rc::new(heap::Value::Closure(a));
@@ -200,8 +215,11 @@ impl VirtualMachine {
                         }
                         _ => panic!("Return link cannot be pushed to the heap"),
                     };
-                    self.stack
-                        .push(Value::Heap(Rc::new(heap::Value::Pair(a, b))));
+                    //
+                    // Build a pair and push the value.
+                    //
+                    let value = Value::Heap(Rc::new(heap::Value::Pair(a, b)));
+                    self.stack.push(value);
                 }
                 //
                 // String operation.

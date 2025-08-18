@@ -742,6 +742,7 @@ impl Compiler {
                 //
                 let expr = Atom::cons(Atom::symbol(name), args);
                 let expn = comp.eval(expr)?;
+                println!("{expn}");
                 //
                 // Check if the result is valid.
                 //
@@ -870,6 +871,7 @@ impl Compiler {
                     //
                     Operator::Car => OpCode::Car.into(),
                     Operator::Cdr => OpCode::Cdr.into(),
+                    Operator::Conc => OpCode::Conc.into(),
                     Operator::Cons => OpCode::Cons.into(),
                     //
                     // String.
@@ -1012,6 +1014,29 @@ impl Compiler {
 
     fn compile_backquote(&mut self, ctxt: &mut Context, quote: &Backquote) -> Result<(), Error> {
         match quote {
+            Backquote::Pair(car, cdr) if car.is_splice() => {
+                //
+                // Process car and cdr.
+                //
+                self.compile_backquote(ctxt, cdr.as_ref())?;
+                self.compile_backquote(ctxt, car.as_ref())?;
+                //
+                // Push cons, consume 2 and producing 1.
+                //
+                let opcode = OpCode::Conc.into();
+                //
+                // Push the opcode.
+                //
+                ctxt.stream.push_back(opcode);
+                //
+                // Update the stack.
+                //
+                ctxt.stackn -= 1;
+                //
+                // Done.
+                //
+                Ok(())
+            }
             Backquote::Pair(car, cdr) => {
                 //
                 // Process car and cdr.
@@ -1055,7 +1080,9 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Backquote::Unquote(stmt) => self.compile_statement(ctxt, stmt),
+            Backquote::Unquote(stmt) | Backquote::UnquoteSplice(stmt) => {
+                self.compile_statement(ctxt, stmt)
+            }
             Backquote::Value(value) => Self::compile_value(ctxt, value),
         }
     }
@@ -1189,6 +1216,7 @@ impl Compiler {
             //
             Self::lift(Operator::Car),
             Self::lift(Operator::Cdr),
+            Self::lift(Operator::Conc),
             Self::lift(Operator::Cons),
             //
             // Predicates.

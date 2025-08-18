@@ -85,6 +85,7 @@ pub enum OpCode {
     //
     Car,
     Cdr,
+    Conc,
     Cons,
     //
     // String operation.

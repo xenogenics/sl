@@ -12,7 +12,7 @@ extern {
 }
 
 match {
-	"(", ")", ".", "`", "'", ",", "~",
+	"(", ")", ".", "`", "'", ",", ",@", "~",
 	r"\^([!-\[]|[\]-~]|\\\\|\\e|\\n|\\r|\\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
@@ -58,8 +58,9 @@ Terms: Rc<Atom> = {
 }
 
 UnquotedTerm: Rc<Atom> = {
-	"," <e:Term> => Atom::cons(Atom::symbol("unquote"), e),
-		<e:Term> => e,
+	","  <e:Term> => Atom::cons(Atom::symbol("unquote"), e),
+	",@" <e:Term> => Atom::cons(Atom::symbol("unquote-splice"), e),
+		 <e:Term> => e,
 }
 
 Term: Rc<Atom> = {

@@ -17,6 +17,17 @@ impl Value {
     pub fn iter(&self) -> ValueIterator {
         ValueIterator(Rc::new(self.clone()))
     }
+
+    pub fn conc(a: Rc<Value>, b: Rc<Value>) -> Rc<Value> {
+        match a.as_ref() {
+            Value::Pair(car, cdr) => Self::cons(car.clone(), Self::conc(cdr.clone(), b)),
+            _ => b,
+        }
+    }
+
+    pub fn cons(a: Rc<Value>, b: Rc<Value>) -> Rc<Value> {
+        Self::Pair(a, b).into()
+    }
 }
 
 impl PartialEq for Value {

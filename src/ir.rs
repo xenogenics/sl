@@ -140,6 +140,8 @@ pub enum Operator {
     Car,
     #[strum(serialize = "cdr")]
     Cdr,
+    #[strum(serialize = "conc")]
+    Conc,
     #[strum(serialize = "cons")]
     Cons,
     //
@@ -182,6 +184,7 @@ impl Operator {
             Operator::Or => 2,
             Operator::Car => 1,
             Operator::Cdr => 1,
+            Operator::Conc => 2,
             Operator::Cons => 2,
             Operator::Str => 1,
             Operator::IsChr => 1,
@@ -243,12 +246,17 @@ pub enum Backquote {
     Pair(Box<Backquote>, Box<Backquote>),
     Symbol(Box<str>),
     Unquote(Box<Statement>),
+    UnquoteSplice(Box<Statement>),
     Value(Value),
 }
 
 impl Backquote {
     pub fn iter(&self) -> BackquoteIterator<'_> {
         BackquoteIterator(self)
+    }
+
+    pub fn is_splice(&self) -> bool {
+        matches!(self, Self::UnquoteSplice(_))
     }
 }
 
@@ -281,6 +289,9 @@ impl Backquote {
                 "unquote" => Statement::from_atom(cdr.clone(), macros)
                     .map(Box::new)
                     .map(Self::Unquote),
+                "unquote-splice" => Statement::from_atom(cdr.clone(), macros)
+                    .map(Box::new)
+                    .map(Self::UnquoteSplice),
                 _ => Self::from_atom(value, macros),
             }
         } else {
@@ -529,6 +540,7 @@ impl Statement {
                 // Quote: unquote.
                 //
                 "unquote" => Err(Error::UnquoteOutsideBackquote),
+                "unquote-splice" => Err(Error::UnquoteOutsideBackquote),
                 //
                 // Control flow: if.
                 //
