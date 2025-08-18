@@ -133,17 +133,24 @@ impl Compiler {
 //
 
 impl CompilerTrait for Compiler {
-    fn eval(mut self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error> {
+    fn eval(mut self, expr: Rc<Atom>) -> Result<Rc<Atom>, Error> {
         //
-        // Convert the atom into a statement.
+        // Wrap the statement into a top-level function.
         //
-        let stmt = Statement::from_atom(atom.clone(), &self.macros)?;
+        let entrypoint = Atom::cons(
+            Atom::symbol("def"),
+            Atom::cons(
+                Atom::symbol("__eval__"),
+                Atom::cons(
+                    Atom::nil(),
+                    Atom::cons(Atom::nil(), Atom::cons(expr, Atom::nil())),
+                ),
+            ),
+        );
         //
-        // Wrap the statement in a main function definition.
+        // Convert the entrypoint into a statement.
         //
-        let stmts = Statements::new(vec![stmt]);
-        let fdef = FunctionDefinition::new("__eval__".into(), Arguments::None, stmts);
-        let topl = TopLevelStatement::Function(atom, fdef);
+        let topl = TopLevelStatement::from_atom(entrypoint, &self.macros)?;
         //
         // Load the top-level statement.
         //
@@ -742,7 +749,6 @@ impl Compiler {
                 //
                 let expr = Atom::cons(Atom::symbol(name), args);
                 let expn = comp.eval(expr)?;
-                println!("{expn}");
                 //
                 // Check if the result is valid.
                 //

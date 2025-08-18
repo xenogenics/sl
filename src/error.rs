@@ -45,7 +45,7 @@ pub enum Error {
     #[error("Macro expansion failed: {0}")]
     MacroExpansion(Box<str>),
     #[error("Main endpoint not defined")]
-    MainNotDefined,
+    EntrypointNotDefined,
     #[cfg(test)]
     #[error("No such context")]
     NoSuchContext,

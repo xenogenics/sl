@@ -23,6 +23,10 @@ impl VirtualMachine {
         }
     }
 
+    pub fn push(&mut self, value: Value) {
+        self.stack.push(value);
+    }
+
     pub fn run(
         &mut self,
         syms: Vec<(Box<str>, usize, Arity)>,
@@ -39,7 +43,7 @@ impl VirtualMachine {
         // Make sure it exists.
         //
         let Some(mut pc) = entrypoint_fn else {
-            return Err(Error::MainNotDefined);
+            return Err(Error::EntrypointNotDefined);
         };
         //
         // Push the initial return value.
