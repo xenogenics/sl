@@ -859,11 +859,13 @@ impl Compiler {
                     // Arithmetics.
                     //
                     Operator::Add => OpCode::Add.into(),
+                    Operator::Sub => OpCode::Sub.into(),
+                    Operator::Mul => OpCode::Mul.into(),
+                    Operator::Div => OpCode::Div.into(),
                     Operator::Ge => OpCode::Ge.into(),
                     Operator::Gt => OpCode::Gt.into(),
                     Operator::Le => OpCode::Le.into(),
                     Operator::Lt => OpCode::Lt.into(),
-                    Operator::Sub => OpCode::Sub.into(),
                     //
                     // Logic.
                     //

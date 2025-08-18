@@ -112,6 +112,10 @@ pub enum Operator {
     Add,
     #[strum(serialize = "-")]
     Sub,
+    #[strum(serialize = "*")]
+    Mul,
+    #[strum(serialize = "/")]
+    Div,
     #[strum(serialize = ">=")]
     Ge,
     #[strum(serialize = ">")]
@@ -173,6 +177,8 @@ impl Operator {
         match self {
             Operator::Add => 2,
             Operator::Sub => 2,
+            Operator::Mul => 2,
+            Operator::Div => 2,
             Operator::Ge => 2,
             Operator::Gt => 2,
             Operator::Le => 2,

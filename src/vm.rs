@@ -85,6 +85,18 @@ impl VirtualMachine {
                     let v = Value::from(Immediate::Number(a - b));
                     self.stack.push(v);
                 }
+                OpCode::Mul => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    let v = Value::from(Immediate::Number(a * b));
+                    self.stack.push(v);
+                }
+                OpCode::Div => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    let v = Value::from(Immediate::Number(a / b));
+                    self.stack.push(v);
+                }
                 OpCode::Ge => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();

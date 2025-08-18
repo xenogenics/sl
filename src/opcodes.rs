@@ -68,6 +68,8 @@ pub enum OpCode {
     //
     Add,
     Sub,
+    Mul,
+    Div,
     Ge,
     Gt,
     Le,
