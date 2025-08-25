@@ -14,6 +14,27 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn as_nul_terminated_string(&self) -> Box<[u8]> {
+        //
+        // Collect the character elements of the list.
+        //
+        let mut bytes: Vec<_> = self
+            .iter()
+            .filter_map(|v| match v.as_ref() {
+                Value::Immediate(Immediate::Char(v)) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        //
+        // Push the NUL termination.
+        //
+        bytes.push(0);
+        //
+        // Done.
+        //
+        bytes.into_boxed_slice()
+    }
+
     pub fn iter(&self) -> ValueIterator {
         ValueIterator(Rc::new(self.clone()))
     }

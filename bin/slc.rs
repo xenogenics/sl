@@ -53,13 +53,13 @@ fn main() -> Result<(), Error> {
     //
     // Generate the bytecode.
     //
-    let state = compiler.compile()?;
+    let artifacts = compiler.compile()?;
     //
     // Write the serialize output.
     //
     let conf = bincode::config::standard();
     let mut file = std::fs::File::create(&args.output)?;
-    bincode::encode_into_std_write(state, &mut file, conf)?;
+    bincode::encode_into_std_write(artifacts, &mut file, conf)?;
     //
     // Done.
     //

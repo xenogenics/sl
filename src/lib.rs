@@ -19,11 +19,11 @@ lalrpop_mod!(
 pub mod atom;
 pub mod compiler;
 pub mod error;
+pub mod ffi;
 pub mod heap;
 pub mod ir;
 pub mod opcodes;
 pub mod stack;
-pub mod syscalls;
 pub mod vm;
 
 //

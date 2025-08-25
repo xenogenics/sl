@@ -57,7 +57,7 @@ fn main() -> Result<(), Error> {
     //
     // Generate the bytecode.
     //
-    let (syms, ops) = compiler.compile()?;
+    let artifacts = compiler.compile()?;
     //
     // Build the virtual machine.
     //
@@ -65,7 +65,7 @@ fn main() -> Result<(), Error> {
     //
     // Run the binary.
     //
-    let result = vm.run(syms, ops)?;
+    let result = vm.run(artifacts)?;
     //
     // Print the stack.
     //

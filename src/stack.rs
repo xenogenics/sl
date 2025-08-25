@@ -38,10 +38,17 @@ impl Value {
         }
     }
 
-    pub fn link(&self) -> usize {
+    pub fn as_link(&self) -> usize {
         match self {
             Value::Link(v) => *v,
             _ => panic!("Expected a return link"),
+        }
+    }
+
+    pub fn as_nul_terminated_string(&self) -> Box<[u8]> {
+        match self {
+            Value::Heap(value) => value.as_nul_terminated_string(),
+            _ => panic!("Expected a heap value"),
         }
     }
 }

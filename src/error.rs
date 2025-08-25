@@ -34,8 +34,12 @@ pub enum Error {
     FunctionAlreadyDefined(Box<str>),
     #[error("Function definition can only happen at the top level")]
     FunctionDefinitionTopLevelOnly,
+    #[error("Invalid foreign type: {0}")]
+    InvalidForeignType(Box<str>),
     #[error("Invalid label: {0}")]
     InvalidLabel(Box<str>),
+    #[error("Invalid string")]
+    InvalidString,
     #[error("Invalid symbol: {0}")]
     InvalidSymbol(Box<str>),
     #[error("Invalid system call: {0}")]
@@ -52,6 +56,8 @@ pub enum Error {
     #[cfg(test)]
     #[error("Operation not supported")]
     NotSupported,
+    #[error("Open self image failed")]
+    OpenSelfImage,
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("Unquote outside backquote context")]
