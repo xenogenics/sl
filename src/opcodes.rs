@@ -24,13 +24,17 @@ pub enum Immediate {
     True,
     Char(u8),
     Number(i64),
+    Extcall(u32),
     Funcall(u32, Arity),
-    Syscall(u32, u32),
     Symbol([u8; 15]),
     Wildcard,
 }
 
 impl Immediate {
+    pub const fn extcall(idx: usize) -> Self {
+        Self::Extcall(idx as u32)
+    }
+
     pub const fn funcall(idx: usize, arity: Arity) -> Self {
         Self::Funcall(idx as u32, arity)
     }
@@ -90,9 +94,11 @@ pub enum OpCode {
     Conc,
     Cons,
     //
-    // String operation.
+    // Bytes operation.
     //
+    Bytes,
     Str,
+    Unpack,
     //
     // Predicates.
     //

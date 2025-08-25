@@ -236,6 +236,17 @@ impl TryFrom<heap::Value> for Rc<Atom> {
                 let cdr = cdr.as_ref().clone().try_into()?;
                 Ok(Atom::Pair(car, cdr).into())
             }
+            heap::Value::Bytes(v) => {
+                let value = v
+                    .iter()
+                    .rev()
+                    .fold(Atom::nil(), |acc, v| Atom::cons(Atom::char(*v), acc));
+                Ok(value)
+            }
+            heap::Value::String(v) => {
+                let value = v.as_c_str().to_str().map_err(|_| Error::InvalidString)?;
+                Ok(Atom::string(value))
+            }
             _ => Err(Error::ExpectedPairOrImmediate),
         }
     }

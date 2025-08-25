@@ -1,11 +1,11 @@
-use std::rc::Rc;
+use std::{ffi::CString, rc::Rc};
 
 use crate::{
+    compiler::Artifacts,
     error::Error,
-    heap,
+    ffi, heap,
     opcodes::{Arity, Immediate, OpCode},
     stack::{Stack, Value},
-    syscalls,
 };
 
 pub struct VirtualMachine {
@@ -27,11 +27,13 @@ impl VirtualMachine {
         self.stack.push(value);
     }
 
-    pub fn run(
-        &mut self,
-        syms: Vec<(Box<str>, usize, Arity)>,
-        ops: Vec<OpCode>,
-    ) -> Result<Value, Error> {
+    pub fn run(&mut self, artifacts: Artifacts) -> Result<Value, Error> {
+        let syms = artifacts.symbols();
+        let ops = artifacts.opcodes();
+        //
+        // Bind the FFIs.
+        //
+        let mut ffis = Self::bind(&artifacts)?;
         //
         // Look-up the entrypoint function.
         //
@@ -240,14 +242,73 @@ impl VirtualMachine {
                 //
                 // String operation.
                 //
+                OpCode::Bytes => {
+                    let value = match self.stack.pop() {
+                        Value::Heap(v) => {
+                            //
+                            // Collect the character elements of the list.
+                            //
+                            let bytes: Vec<_> = v
+                                .iter()
+                                .filter_map(|v| match v.as_ref() {
+                                    heap::Value::Immediate(Immediate::Char(v)) => Some(*v),
+                                    _ => None,
+                                })
+                                .collect();
+                            //
+                            // Done.
+                            //
+                            let bytes = bytes.into_boxed_slice();
+                            Value::Heap(Rc::new(heap::Value::Bytes(bytes)))
+                        }
+                        Value::Immediate(Immediate::Number(v)) => {
+                            let bytes = vec![0; v as usize].into_boxed_slice();
+                            Value::Heap(Rc::new(heap::Value::Bytes(bytes)))
+                        }
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
                 OpCode::Str => {
                     let value = match self.stack.pop() {
-                        Value::Heap(value) => match value.as_ref() {
-                            heap::Value::Immediate(imm) => Self::immediate_to_string(*imm),
-                            heap::Value::Pair(..) => Value::Heap(value.clone()),
+                        Value::Heap(v) => {
+                            //
+                            // Collect the character elements of the list.
+                            //
+                            let bytes: Vec<_> = v
+                                .iter()
+                                .filter_map(|v| match v.as_ref() {
+                                    heap::Value::Immediate(Immediate::Char(v)) => Some(*v),
+                                    _ => None,
+                                })
+                                .collect();
+                            //
+                            // Done.
+                            //
+                            let cstr = unsafe { CString::from_vec_unchecked(bytes) };
+                            Value::Heap(Rc::new(heap::Value::String(cstr)))
+                        }
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
+                OpCode::Unpack => {
+                    let value = match self.stack.pop() {
+                        Value::Heap(v) => match v.as_ref() {
+                            heap::Value::Bytes(v) => {
+                                let value = v.iter().rev().fold(
+                                    heap::Value::Immediate(Immediate::Nil),
+                                    |acc, v| {
+                                        heap::Value::Pair(
+                                            Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
+                                            Rc::new(acc),
+                                        )
+                                    },
+                                );
+                                Value::Heap(Rc::new(value))
+                            }
                             _ => Value::Immediate(Immediate::Nil),
                         },
-                        Value::Immediate(imm) => Self::immediate_to_string(imm),
                         _ => Value::Immediate(Immediate::Nil),
                     };
                     self.stack.push(value);
@@ -322,6 +383,37 @@ impl VirtualMachine {
                                 pc = addr as usize;
                                 continue;
                             }
+                            Immediate::Extcall(index) => {
+                                //
+                                // Grab the external function definition.
+                                //
+                                let Some(ffi) = ffis.get_mut(index as usize) else {
+                                    panic!("No such external function definition: {index}");
+                                };
+                                //
+                                // Get the function's arity.
+                                //
+                                let Arity::Some(argexp) = ffi.arity() else {
+                                    unreachable!();
+                                };
+                                //
+                                // Pack in case of currying.
+                                //
+                                if argcnt + argpak < argexp as usize {
+                                    let imm = Immediate::Extcall(index);
+                                    self.stack.push(Value::Immediate(imm));
+                                    self.stack.pack(argcnt + argpak, argcnt + paklen);
+                                }
+                                //
+                                // Execute the foreign call.
+                                //
+                                else {
+                                    let values = self.stack.slice_n(argexp as usize);
+                                    let result = ffi.call(values)?;
+                                    self.stack.drop(argexp as usize);
+                                    self.stack.push(result);
+                                }
+                            }
                             Immediate::Funcall(addr, arity @ Arity::Some(argexp)) => {
                                 //
                                 // Pack in case of currying.
@@ -378,26 +470,38 @@ impl VirtualMachine {
                                     continue;
                                 }
                             }
-                            Immediate::Syscall(index, argexp) => {
-                                //
-                                // Pack in case of currying.
-                                //
-                                if argcnt + argpak < argexp as usize {
-                                    let imm = Immediate::Syscall(index, argexp);
-                                    self.stack.push(Value::Immediate(imm));
-                                    self.stack.pack(argcnt + argpak, argcnt + paklen);
-                                }
-                                //
-                                // Push the return link and go to the funcall address.
-                                //
-                                else {
-                                    let values = self.stack.slice_n(argexp as usize);
-                                    let res = syscalls::call(index, values);
-                                    self.stack.drop(argexp as usize);
-                                    self.stack.push(res);
-                                }
-                            }
-                            _ => panic!("Expected a funcall or syscall"),
+                            _ => panic!("Expected an extcall, funcall or syscall"),
+                        }
+                    }
+                    Value::Immediate(Immediate::Extcall(index)) => {
+                        //
+                        // Grab the external function definition.
+                        //
+                        let Some(ffi) = ffis.get_mut(index as usize) else {
+                            panic!("No such external function definition: {index}");
+                        };
+                        //
+                        // Get the function's arity.
+                        //
+                        let Arity::Some(argexp) = ffi.arity() else {
+                            unreachable!();
+                        };
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt < argexp as usize {
+                            let imm = Immediate::Extcall(index);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt, argcnt + 1);
+                        }
+                        //
+                        // Execute the foreign call.
+                        //
+                        else {
+                            let values = self.stack.slice_n(argexp as usize);
+                            let result = ffi.call(values)?;
+                            self.stack.drop(argexp as usize);
+                            self.stack.push(result);
                         }
                     }
                     Value::Immediate(Immediate::Funcall(addr, Arity::All)) => {
@@ -471,29 +575,10 @@ impl VirtualMachine {
                             continue;
                         }
                     }
-                    Value::Immediate(Immediate::Syscall(index, argexp)) => {
-                        //
-                        // Pack in case of currying.
-                        //
-                        if argcnt < argexp as usize {
-                            let imm = Immediate::Syscall(index, argexp);
-                            self.stack.push(Value::Immediate(imm));
-                            self.stack.pack(argcnt, argcnt + 1);
-                        }
-                        //
-                        // Push the return link and go to the funcall address.
-                        //
-                        else {
-                            let values = self.stack.slice_n(argexp as usize);
-                            let res = syscalls::call(index, values);
-                            self.stack.drop(argexp as usize);
-                            self.stack.push(res);
-                        }
-                    }
-                    _ => panic!("Expected a closure, funcall or syscall"),
+                    _ => panic!("Expected a closure, extcall, funcall or syscall"),
                 },
                 OpCode::Ret => {
-                    pc = self.stack.unlink().link();
+                    pc = self.stack.unlink().as_link();
                     continue;
                 }
                 //
@@ -526,59 +611,11 @@ impl VirtualMachine {
 //
 
 impl VirtualMachine {
-    fn immediate_to_string(imm: Immediate) -> Value {
-        match imm {
-            Immediate::True => {
-                let e = heap::Value::Pair(
-                    Rc::new(heap::Value::Immediate(Immediate::Char(b'T'))),
-                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
-                );
-                Value::Heap(Rc::new(e))
-            }
-            Immediate::Char(v) => {
-                let e = heap::Value::Pair(
-                    Rc::new(heap::Value::Immediate(Immediate::Char(v))),
-                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
-                );
-                Value::Heap(Rc::new(e))
-            }
-            Immediate::Number(v) => {
-                //
-                // Stringify the number.
-                //
-                let v = format!("{v}");
-                //
-                // Convert it to a string (list of chars).
-                //
-                let value = v.bytes().rev().fold(
-                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
-                    |acc, v| {
-                        let v = Rc::new(heap::Value::Immediate(Immediate::Char(v)));
-                        Rc::new(heap::Value::Pair(v, acc))
-                    },
-                );
-                //
-                // Done.
-                //
-                Value::Heap(value)
-            }
-            Immediate::Symbol(v) => {
-                //
-                // Convert it to a string (list of chars).
-                //
-                let value = v.into_iter().filter(|v| *v != 0).rev().fold(
-                    Rc::new(heap::Value::Immediate(Immediate::Nil)),
-                    |acc, v| {
-                        let v = Rc::new(heap::Value::Immediate(Immediate::Char(v)));
-                        Rc::new(heap::Value::Pair(v, acc))
-                    },
-                );
-                //
-                // Done.
-                //
-                Value::Heap(value)
-            }
-            _ => Value::Immediate(Immediate::Nil),
-        }
+    fn bind(artifacts: &Artifacts) -> Result<Vec<ffi::Stub>, Error> {
+        artifacts
+            .external_functions()
+            .iter()
+            .map(|(_, v)| ffi::Stub::try_from(v.clone()))
+            .collect()
     }
 }

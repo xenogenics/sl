@@ -37,8 +37,13 @@
 			(map2 fun (cdr lst1) (cdr lst2)))))
 
 (def rev (lst)
-	"Reverse the elements in LST"
+	"Reverse the elements in LST."
 	(foldl (\ (acc e) (cons e acc)) nil lst))
+
+(def take (n lst)
+	"Take N elements from LST."
+	(if (and (not (nil? lst)) (> n 0))
+		(cons (car lst) (take (- n 1) (cdr lst)))))
 
 (def zip (lst1 lst2)
 	"Sequentially pair-up elements from LST1 and LST2."

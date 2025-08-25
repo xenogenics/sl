@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     atom::Atom,
-    compiler::{CompilerTrait, SymbolsAndOpCodes},
+    compiler::{Artifacts, CompilerTrait},
     error::Error,
 };
 
@@ -22,7 +22,7 @@ impl CompilerTrait for NullCompiler {
         Ok(())
     }
 
-    fn compile(self) -> Result<SymbolsAndOpCodes, Error> {
+    fn compile(self) -> Result<Artifacts, Error> {
         Ok(Default::default())
     }
 }
@@ -119,7 +119,7 @@ mod compiler {
     use std::collections::HashSet;
 
     use crate::{
-        compiler::{Compiler, CompilerTrait, Context, LabelOrOpCode, SymbolsAndOpCodes},
+        compiler::{Artifacts, Compiler, CompilerTrait, Context, LabelOrOpCode},
         error::Error,
         grammar::ListsParser,
         ir::Statement,
@@ -145,7 +145,7 @@ mod compiler {
         Ok(context)
     }
 
-    fn compile(stmt: &str) -> Result<SymbolsAndOpCodes, Error> {
+    fn compile(stmt: &str) -> Result<Artifacts, Error> {
         let parser = ListsParser::new();
         let mut compiler = Compiler::default();
         let _ = parser
@@ -154,7 +154,7 @@ mod compiler {
         compiler.compile()
     }
 
-    fn compile_with_operators(stmt: &str) -> Result<SymbolsAndOpCodes, Error> {
+    fn compile_with_operators(stmt: &str) -> Result<Artifacts, Error> {
         let parser = ListsParser::new();
         let mut compiler = Compiler::default();
         compiler.lift_operators()?;
@@ -404,7 +404,7 @@ mod compiler {
                 OpCode::Psh(Immediate::Nil).into(),
                 OpCode::Psh(Immediate::Number(3)).into(),
                 OpCode::Cons.into(),
-                LabelOrOpCode::Get("V".into()),
+                LabelOrOpCode::Funcall("V".into()),
                 OpCode::Cons.into(),
                 OpCode::Psh(Immediate::Number(1)).into(),
                 OpCode::Cons.into(),
@@ -433,7 +433,7 @@ mod compiler {
                 OpCode::Psh(Immediate::Nil).into(),
                 OpCode::Psh(Immediate::Number(2)).into(),
                 OpCode::Cons.into(),
-                LabelOrOpCode::Get("V".into()),
+                LabelOrOpCode::Funcall("V".into()),
                 OpCode::Cons.into(),
                 OpCode::Psh(Immediate::Number(1)).into(),
                 OpCode::Cons.into(),
@@ -449,9 +449,9 @@ mod compiler {
 
     #[test]
     fn def_single_statement() -> Result<(), Error> {
-        let (_, result) = compile("(def ADD (A B) (+ A B))")?;
+        let result = compile("(def ADD (A B) (+ A B))")?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Rot(3),
                 OpCode::Get(2),
@@ -467,9 +467,9 @@ mod compiler {
 
     #[test]
     fn def_multiple_statements() -> Result<(), Error> {
-        let (_, result) = compile("(def ADD (A B C) (+ A B) (- A C))")?;
+        let result = compile("(def ADD (A B C) (+ A B) (- A C))")?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Rot(4),
                 OpCode::Get(2),
@@ -489,14 +489,14 @@ mod compiler {
 
     #[test]
     fn def_with_main() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def ADD (A B C) (+ A B) (- A C))
             (def main () (ADD 1 2 3))
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // ADD.
@@ -528,9 +528,9 @@ mod compiler {
 
     #[test]
     fn def_fibonacci() -> Result<(), Error> {
-        let (_, result) = compile("(def fib (N) (if (<= N 1) N (+ (fib (- N 1)) (fib (- N 2)))))")?;
+        let result = compile("(def fib (N) (if (<= N 1) N (+ (fib (- N 1)) (fib (- N 2)))))")?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Rot(2),                                     // [ret0, N]
                 OpCode::Psh(Immediate::Number(1)),                  // [ret0, N, 1]
@@ -560,10 +560,9 @@ mod compiler {
 
     #[test]
     fn def_with_let_and_lambda() -> Result<(), Error> {
-        let (_, result) =
-            compile("(def test(a) (let ((add . (\\ (b c) (+ b c)))) (- a (add 1 2))))")?;
+        let result = compile("(def test(a) (let ((add . (\\ (b c) (+ b c)))) (- a (add 1 2))))")?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // Lambda.
@@ -599,7 +598,7 @@ mod compiler {
 
     #[test]
     fn def_with_lambda_with_external_bindings() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def test(a)
                 (let ((add . (\ (b)
@@ -608,7 +607,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // (\ () (+ a b))
@@ -654,14 +653,14 @@ mod compiler {
 
     #[test]
     fn def_loop_with_tailcall_optimization() -> Result<(), Error> {
-        let (_, result) = compile("(def test() (test))")?;
-        assert_eq!(result, vec![OpCode::Br(0)]);
+        let result = compile("(def test() (test))")?;
+        assert_eq!(result.opcodes(), vec![OpCode::Br(0)]);
         Ok(())
     }
 
     #[test]
     fn def_loop_with_many_statements_with_tailcall_optimization() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def test()
                 (+ 1 1)
@@ -669,7 +668,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Psh(Immediate::Number(1)),
                 OpCode::Psh(Immediate::Number(1)),
@@ -683,9 +682,9 @@ mod compiler {
 
     #[test]
     fn def_if_then_with_tailcall_optimization() -> Result<(), Error> {
-        let (_, result) = compile("(def test (a b) (if a (test (cdr a) (cdr b))))")?;
+        let result = compile("(def test (a b) (if a (test (cdr a) (cdr b))))")?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Rot(3),              // [ret0, b, a]
                 OpCode::Get(1),              // [ret0, b, a, a]
@@ -708,7 +707,7 @@ mod compiler {
 
     #[test]
     fn def_if_then_else_with_tailcall_optimization() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def test(a)
                 (if a
@@ -718,7 +717,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 OpCode::Rot(2),  // [ret0, a]
                 OpCode::Get(1),  // [ret0, a, a]
@@ -740,7 +739,7 @@ mod compiler {
 
     #[test]
     fn def_capture_all_arguments_with_main() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def count_args_r (A)
                 (if A
@@ -754,7 +753,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // count_args_r
@@ -800,7 +799,7 @@ mod compiler {
 
     #[test]
     fn def_empty_capture_with_main() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def count_args A (if A 1 0))
 
@@ -809,7 +808,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // count_args
@@ -836,7 +835,7 @@ mod compiler {
 
     #[test]
     fn def_remainder_capture_with_main() -> Result<(), Error> {
-        let (_, result) = compile(
+        let result = compile(
             r#"
             (def select (A B . C) (if C A B))
 
@@ -845,7 +844,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // select().
@@ -876,7 +875,7 @@ mod compiler {
 
     #[test]
     fn def_operator_currying_with_main() -> Result<(), Error> {
-        let (_, result) = compile_with_operators(
+        let result = compile_with_operators(
             r#"
             (def incr (A)
                 (let ((+1 . (+ 1)))
@@ -887,7 +886,7 @@ mod compiler {
             "#,
         )?;
         assert_eq!(
-            result,
+            result.opcodes(),
             vec![
                 //
                 // +().

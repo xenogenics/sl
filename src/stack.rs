@@ -38,10 +38,24 @@ impl Value {
         }
     }
 
-    pub fn link(&self) -> usize {
+    pub fn as_link(&self) -> usize {
         match self {
             Value::Link(v) => *v,
             _ => panic!("Expected a return link"),
+        }
+    }
+
+    pub fn as_mut_ptr(&self) -> *mut u8 {
+        match self {
+            Value::Heap(value) => value.as_mut_ptr(),
+            _ => panic!("Expected a heap value"),
+        }
+    }
+
+    pub fn as_raw_cstr(&self) -> *mut i8 {
+        match self {
+            Value::Heap(value) => value.as_raw_cstr(),
+            _ => panic!("Expected a heap value"),
         }
     }
 }

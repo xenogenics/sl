@@ -1,5 +1,5 @@
-use clap::{arg, Parser};
-use sl::compiler::SymbolsAndOpCodes;
+use clap::{Parser, arg};
+use sl::compiler::Artifacts;
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -35,7 +35,12 @@ fn main() -> Result<(), Error> {
     // Decode the bytecode file.
     //
     let conf = bincode::config::standard();
-    let (syms, ops): SymbolsAndOpCodes = bincode::decode_from_std_read(&mut file, conf)?;
+    let artifacts: Artifacts = bincode::decode_from_std_read(&mut file, conf)?;
+    //
+    // Split the artifacts.
+    //
+    let syms = artifacts.symbols();
+    let ops = artifacts.opcodes();
     //
     // Dump the binary.
     //

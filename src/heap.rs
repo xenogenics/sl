@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{ffi::CString, rc::Rc};
 
 use crate::{opcodes::Immediate, stack};
 
@@ -8,12 +8,42 @@ use crate::{opcodes::Immediate, stack};
 
 #[derive(Clone, Debug, Eq)]
 pub enum Value {
+    Bytes(Box<[u8]>),
     Closure(stack::Closure),
     Immediate(Immediate),
     Pair(Rc<Value>, Rc<Value>),
+    String(CString),
 }
 
 impl Value {
+    pub fn as_mut_ptr(&self) -> *mut u8 {
+        match self {
+            Value::Bytes(v) => {
+                //
+                // NOTE(xrg): This call is used for "bytes" types in external
+                // signatures. These bytes are buffers that are expected to be
+                // modified, so we transmute here.
+                //
+                unsafe { std::mem::transmute(v.as_ptr()) }
+            }
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn as_raw_cstr(&self) -> *mut i8 {
+        match self {
+            Value::String(v) => {
+                //
+                // NOTE(xrg): This call is used for "string" types in external
+                // signatures. These strings are stricly read-only but the FFI
+                // interface requires *mut pointers, so we transmute here.
+                //
+                unsafe { std::mem::transmute(v.as_ptr()) }
+            }
+            _ => std::ptr::null_mut(),
+        }
+    }
+
     pub fn iter(&self) -> ValueIterator {
         ValueIterator(Rc::new(self.clone()))
     }

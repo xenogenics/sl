@@ -5,6 +5,7 @@ use std::{
     str::FromStr,
 };
 
+use bincode::{Decode, Encode};
 use strum_macros::EnumString;
 
 use crate::{atom::Atom, error::Error, opcodes::Arity};
@@ -100,6 +101,97 @@ impl TryFrom<Rc<Atom>> for Arguments {
 }
 
 //
+// Typed arguments.
+//
+
+#[derive(Clone, Copy, Debug, EnumString, Encode, Decode)]
+pub enum ExternalType {
+    #[strum(serialize = "bytes")]
+    Bytes,
+    #[strum(serialize = "integer")]
+    Integer,
+    #[strum(serialize = "string")]
+    String,
+    #[strum(serialize = "void")]
+    Void,
+}
+
+impl TryFrom<Rc<Atom>> for ExternalType {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        //
+        // Make sure we have a symbol.
+        //
+        let Atom::Symbol(sym) = value.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Convert the symbol name to a type.
+        //
+        Self::from_str(sym).map_err(|_| Error::InvalidForeignType(sym.clone()))
+    }
+}
+
+#[derive(Clone, Debug, Encode, Decode)]
+pub struct ExternalArguments(Vec<(Box<str>, ExternalType)>);
+
+impl ExternalArguments {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn types(&self) -> impl std::iter::Iterator<Item = ExternalType> {
+        self.0.iter().map(|(_, v)| *v)
+    }
+}
+
+impl TryFrom<Rc<Atom>> for ExternalArguments {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Error> {
+        //
+        // Make sure we have a pair.
+        //
+        if !value.is_pair() {
+            return Err(Error::ExpectedPair);
+        }
+        //
+        // Build the argument list.
+        //
+        let args = value
+            .into_iter()
+            .map(|v| -> Result<_, Error> {
+                //
+                // Make sure we have a pair.
+                //
+                let Atom::Pair(name, ftyp) = v.as_ref() else {
+                    return Err(Error::ExpectedPair);
+                };
+                //
+                // Make sure the argument name is a symbol.
+                //
+                let Atom::Symbol(name) = name.as_ref() else {
+                    return Err(Error::ExpectedSymbol);
+                };
+                //
+                // Parse the foreign type.
+                //
+                let ftyp = ExternalType::try_from(ftyp.clone())?;
+                //
+                // Done.
+                //
+                Ok((name.clone(), ftyp))
+            })
+            .collect::<Result<_, Error>>()?;
+        //
+        // Done.
+        //
+        Ok(Self(args))
+    }
+}
+
+//
 // Built-in operator.
 //
 
@@ -149,10 +241,14 @@ pub enum Operator {
     #[strum(serialize = "cons")]
     Cons,
     //
-    // String operation.
+    // Bytes operation.
     //
+    #[strum(serialize = "bytes")]
+    Bytes,
     #[strum(serialize = "str")]
     Str,
+    #[strum(serialize = "unpack")]
+    Unpack,
     //
     // Predicates.
     //
@@ -192,7 +288,9 @@ impl Operator {
             Operator::Cdr => 1,
             Operator::Conc => 2,
             Operator::Cons => 2,
+            Operator::Bytes => 1,
             Operator::Str => 1,
+            Operator::Unpack => 1,
             Operator::IsChr => 1,
             Operator::IsNum => 1,
             Operator::IsLst => 1,
@@ -215,6 +313,7 @@ pub enum Value {
     True,
     Char(u8),
     Number(i64),
+    String(Box<str>),
     Wildcard,
 }
 
@@ -227,7 +326,8 @@ impl TryFrom<Rc<Atom>> for Value {
             Atom::True => Ok(Self::True),
             Atom::Char(v) => Ok(Self::Char(*v)),
             Atom::Number(v) => Ok(Self::Number(*v)),
-            Atom::Pair(..) | Atom::String(_) | Atom::Symbol(_) => Err(Error::ExpectedValue),
+            Atom::String(v) => Ok(Self::String(v.clone())),
+            Atom::Pair(..) | Atom::Symbol(_) => Err(Error::ExpectedValue),
             Atom::Wildcard => Ok(Self::Wildcard),
         }
     }
@@ -274,10 +374,6 @@ impl Backquote {
                 let cdr = Self::from_unquote(cdr.clone(), macros)?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
-                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
-                acc
-            })),
             Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
@@ -350,10 +446,6 @@ impl TryFrom<Rc<Atom>> for Quote {
                 let cdr = Self::try_from(cdr.clone())?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::String(v) => Ok(v.chars().rev().fold(Self::Value(Value::Nil), |mut acc, v| {
-                acc = Self::Pair(Self::Value(Value::Char(v as u8)).into(), acc.into());
-                acc
-            })),
             Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
@@ -390,7 +482,6 @@ pub enum Statement {
     Expand(Rc<Atom>, Box<str>, Statements),
     Lambda(Rc<Atom>, Arguments, Statements),
     Operator(Rc<Atom>, Operator),
-    SysCall(Rc<Atom>, Box<str>),
     //
     // Control structures.
     //
@@ -421,7 +512,6 @@ impl Statement {
             | Statement::Expand(atom, ..)
             | Statement::Lambda(atom, ..)
             | Statement::Operator(atom, _)
-            | Statement::SysCall(atom, _)
             | Statement::IfThenElse(atom, ..)
             | Statement::Let(atom, ..)
             | Statement::Prog(atom, _)
@@ -501,10 +591,6 @@ impl Statement {
     pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         match atom.as_ref() {
             Atom::Pair(..) => Self::from_pair(atom.clone(), macros),
-            Atom::String(_) => {
-                let val = Quote::try_from(atom.clone())?;
-                Ok(Self::Quote(atom, val))
-            }
             Atom::Symbol(sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
             _ => {
                 let val = Value::try_from(atom.clone())?;
@@ -667,32 +753,6 @@ impl Statement {
                 "prog" => {
                     let stmts = Statements::from_atom(rem.clone(), macros)?;
                     Ok(Self::Prog(atom, stmts))
-                }
-                //
-                // System call.
-                //
-                "syscall" => {
-                    //
-                    // Split the syscall.
-                    //
-                    let Atom::Pair(sym, rem) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
-                    };
-                    //
-                    // Make sure the first argument is a symbol
-                    //
-                    let Atom::Symbol(name) = sym.as_ref() else {
-                        return Err(Error::ExpectedSymbol);
-                    };
-                    //
-                    // Build the statements.
-                    //
-                    let stmt = Box::new(Statement::SysCall(sym.clone(), name.clone()));
-                    let stmts = Statements::from_atom(rem.clone(), macros)?;
-                    //
-                    // Done.
-                    //
-                    Ok(Self::Apply(atom, stmt, stmts, Location::Any))
                 }
                 //
                 // Other symbols.
@@ -886,6 +946,7 @@ impl Statements {
 
 #[derive(Debug)]
 pub enum TopLevelStatement {
+    External(Rc<Atom>, ExternalDefinition),
     Function(Rc<Atom>, FunctionDefinition),
     Macro(Rc<Atom>, FunctionDefinition),
     Use(Rc<Atom>, Statements),
@@ -895,12 +956,14 @@ impl TopLevelStatement {
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
             TopLevelStatement::Function(_, def) | TopLevelStatement::Macro(_, def) => def.closure(),
-            TopLevelStatement::Use(..) => Default::default(),
+            _ => Default::default(),
         }
     }
 
+    #[cfg(test)]
     pub fn statements(&self) -> &Statements {
         match self {
+            TopLevelStatement::External(..) => panic!("FFI has no statement"),
             TopLevelStatement::Function(_, def) | TopLevelStatement::Macro(_, def) => {
                 def.statements()
             }
@@ -929,6 +992,10 @@ impl TopLevelStatement {
                 let val = FunctionDefinition::from_atom(rem.clone(), macros)?;
                 Ok(Self::Function(atom, val))
             }
+            "ext" => {
+                let val = ExternalDefinition::from_atom(rem.clone(), macros)?;
+                Ok(Self::External(atom, val))
+            }
             "mac" => {
                 let val = FunctionDefinition::from_atom(rem.clone(), macros)?;
                 Ok(Self::Macro(atom, val))
@@ -945,10 +1012,106 @@ impl TopLevelStatement {
 impl Display for TopLevelStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TopLevelStatement::Function(atom, _)
+            TopLevelStatement::External(atom, _)
+            | TopLevelStatement::Function(atom, _)
             | TopLevelStatement::Macro(atom, _)
             | TopLevelStatement::Use(atom, _) => write!(f, "{atom}"),
         }
+    }
+}
+
+//
+// Foreign function definition.
+//
+
+#[derive(Clone, Debug, Encode, Decode)]
+pub struct ExternalDefinition(Box<str>, Box<str>, ExternalArguments, ExternalType);
+
+impl ExternalDefinition {
+    pub fn arity(&self) -> Arity {
+        Arity::Some(self.2.0.len() as u16)
+    }
+
+    pub fn name(&self) -> &Box<str> {
+        &self.0
+    }
+
+    pub fn symbol(&self) -> &Box<str> {
+        &self.1
+    }
+
+    pub fn arguments(&self) -> &ExternalArguments {
+        &self.2
+    }
+
+    pub fn return_type(&self) -> ExternalType {
+        self.3
+    }
+
+    pub fn from_atom(atom: Rc<Atom>, _: &HashSet<Box<str>>) -> Result<Self, Error> {
+        //
+        // Extract the function name.
+        //
+        let Atom::Pair(name, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Make sure the function name is a symbol.
+        //
+        let Atom::Symbol(name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Extract the symbol name.
+        //
+        let Atom::Pair(symbol, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Check the symbol name.
+        //
+        let symbol = match symbol.as_ref() {
+            Atom::Symbol(v) => v.clone(),
+            Atom::Nil => name.clone(),
+            _ => return Err(Error::ExpectedSymbol),
+        };
+        //
+        // Extract the arguments.
+        //
+        let Atom::Pair(args, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Build the argument list.
+        //
+        let args: ExternalArguments = args.clone().try_into()?;
+        //
+        // Check if there is a comment.
+        //
+        let Atom::Pair(maybe_comment, return_type) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Skip the comment if any.
+        //
+        let rem = match maybe_comment.as_ref() {
+            Atom::String(_) => return_type,
+            _ => rem,
+        };
+        //
+        // Get the return type.
+        //
+        let Atom::Pair(return_type, _) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Get the return type.
+        //
+        let rtyp: ExternalType = return_type.clone().try_into()?;
+        /*
+         * Done.
+         */
+        Ok(Self(name.clone(), symbol, args, rtyp))
     }
 }
 
@@ -1017,7 +1180,7 @@ impl FunctionDefinition {
         // Skip the comment if any.
         //
         let rem = match maybe_comment.as_ref() {
-            Atom::String(_) => statements,
+            Atom::Nil | Atom::String(_) => statements,
             _ => rem,
         };
         //

@@ -1,5 +1,5 @@
 use clap::{Parser, arg};
-use sl::{compiler::SymbolsAndOpCodes, vm::VirtualMachine};
+use sl::{compiler::Artifacts, vm::VirtualMachine};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -35,7 +35,7 @@ fn main() -> Result<(), Error> {
     // Decode the bytecode file.
     //
     let conf = bincode::config::standard();
-    let (syms, ops): SymbolsAndOpCodes = bincode::decode_from_std_read(&mut file, conf)?;
+    let artifacts: Artifacts = bincode::decode_from_std_read(&mut file, conf)?;
     //
     // Build the virtual machine.
     //
@@ -43,7 +43,7 @@ fn main() -> Result<(), Error> {
     //
     // Run the binary.
     //
-    let result = vm.run(syms, ops)?;
+    let result = vm.run(artifacts)?;
     //
     // Print the stack.
     //

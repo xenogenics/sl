@@ -4,16 +4,17 @@ use std::{
     rc::Rc,
 };
 
+use bincode::{Decode, Encode};
+
 use crate::{
     atom::Atom,
     error::Error,
     grammar::ListsParser,
     ir::{
-        Arguments, Backquote, FunctionDefinition, Location, Operator, Quote, Statement, Statements,
-        TopLevelStatement, Value,
+        Arguments, Backquote, ExternalDefinition, FunctionDefinition, Location, Operator, Quote,
+        Statement, Statements, TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
-    syscalls,
     vm::VirtualMachine,
 };
 
@@ -74,8 +75,8 @@ impl Context {
 pub(crate) enum LabelOrOpCode {
     Branch(Box<str>),
     BranchIfNot(Box<str>),
+    Extcall(Box<str>),
     Funcall(Box<str>),
-    Get(Box<str>),
     OpCode(OpCode),
 }
 
@@ -95,7 +96,38 @@ type Stream = VecDeque<LabelOrOpCode>;
 // Symbols and OpCodes.
 //
 
-pub type SymbolsAndOpCodes = (Vec<(Box<str>, usize, Arity)>, OpCodes);
+#[derive(Default, Encode, Decode)]
+pub struct Artifacts {
+    extfuns: Vec<(Box<str>, ExternalDefinition)>,
+    symbols: Vec<(Box<str>, usize, Arity)>,
+    opcodes: OpCodes,
+}
+
+impl Artifacts {
+    pub fn new(
+        extfuns: Vec<(Box<str>, ExternalDefinition)>,
+        symbols: Vec<(Box<str>, usize, Arity)>,
+        opcodes: OpCodes,
+    ) -> Self {
+        Self {
+            extfuns,
+            symbols,
+            opcodes,
+        }
+    }
+
+    pub fn external_functions(&self) -> &[(Box<str>, ExternalDefinition)] {
+        &self.extfuns
+    }
+
+    pub fn symbols(&self) -> &[(Box<str>, usize, Arity)] {
+        &self.symbols
+    }
+
+    pub fn opcodes(&self) -> &[OpCode] {
+        &self.opcodes
+    }
+}
 
 //
 // Compiler trait.
@@ -104,7 +136,7 @@ pub type SymbolsAndOpCodes = (Vec<(Box<str>, usize, Arity)>, OpCodes);
 pub trait CompilerTrait: Clone {
     fn eval(self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error>;
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
-    fn compile(self) -> Result<SymbolsAndOpCodes, Error>;
+    fn compile(self) -> Result<Artifacts, Error>;
 }
 
 //
@@ -116,6 +148,7 @@ pub struct Compiler {
     blocks: Vec<(Box<str>, Context)>,
     defuns: HashMap<Box<str>, Arity>,
     macros: HashSet<Box<str>>,
+    exfuns: HashMap<Box<str>, ExternalDefinition>,
     labels: HashMap<Box<str>, usize>,
     lcount: usize,
 }
@@ -158,7 +191,7 @@ impl CompilerTrait for Compiler {
         //
         // Generate the bytecode.
         //
-        let (syms, ops) = self.compile()?;
+        let artifacts = self.compile()?;
         //
         // Build the virtual machine.
         //
@@ -166,7 +199,7 @@ impl CompilerTrait for Compiler {
         //
         // Run.
         //
-        let result = vm.run(syms, ops)?;
+        let result = vm.run(artifacts)?;
         //
         // Convert the result into an atom.
         //
@@ -178,19 +211,32 @@ impl CompilerTrait for Compiler {
         self.load_statement(stmt)
     }
 
-    fn compile(self) -> Result<SymbolsAndOpCodes, Error> {
+    fn compile(self) -> Result<Artifacts, Error> {
         //
         // Collect the live defuns.
         //
-        let live_defuns = self.collect_live_defuns()?;
+        let liveset = self.collect_liveset()?;
+        //
+        // Serialize the live external functions.
+        //
+        let exfuns: Vec<_> = self
+            .exfuns
+            .into_iter()
+            .filter(|(k, _)| {
+                liveset
+                    .as_ref()
+                    .map(|v| v.contains(k.as_ref()))
+                    .unwrap_or(true)
+            })
+            .collect();
         //
         // Serialize the live streams.
         //
-        let (index, stream) = self
+        let (defuns, stream) = self
             .blocks
             .into_iter()
             .filter(|(k, _)| {
-                live_defuns
+                liveset
                     .as_ref()
                     .map(|v| v.contains(k.as_ref()))
                     .unwrap_or(true)
@@ -217,27 +263,28 @@ impl CompilerTrait for Compiler {
                     let delta = self.labels.get(&v).copied().ok_or(Error::InvalidLabel(v))?;
                     Ok(OpCode::Brn(delta as isize))
                 }
-                LabelOrOpCode::Funcall(sym) => {
+                LabelOrOpCode::Extcall(sym) => {
                     //
                     // Get the address of the symbol.
                     //
-                    let (addr, argcnt) = index
+                    let index = exfuns
                         .iter()
-                        .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
+                        .enumerate()
+                        .find_map(|(i, (k, _))| (k == &sym).then_some(i))
                         .ok_or(Error::InvalidSymbol(sym))?;
                     //
                     // Push the funcall.
                     //
-                    Ok(OpCode::Psh(Immediate::funcall(addr, argcnt)))
+                    Ok(OpCode::Psh(Immediate::extcall(index)))
                 }
-                LabelOrOpCode::Get(sym) => {
+                LabelOrOpCode::Funcall(sym) => {
                     //
                     // Get the address of the symbol.
                     //
-                    let (addr, argcnt) = index
+                    let (addr, argcnt) = defuns
                         .iter()
                         .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
-                        .ok_or(Error::UnresolvedSymbol(sym))?;
+                        .ok_or(Error::InvalidSymbol(sym))?;
                     //
                     // Push the funcall.
                     //
@@ -249,7 +296,7 @@ impl CompilerTrait for Compiler {
         //
         // Done.
         //
-        Ok((index, opcodes))
+        Ok(Artifacts::new(exfuns, defuns, opcodes))
     }
 }
 
@@ -258,7 +305,7 @@ impl CompilerTrait for Compiler {
 //
 
 impl Compiler {
-    fn collect_live_defuns_for_context(
+    fn collect_liveset_for_context(
         &self,
         name: &str,
         ctxt: &Context,
@@ -275,8 +322,7 @@ impl Compiler {
             .stream
             .iter()
             .filter_map(|v| match v {
-                LabelOrOpCode::Funcall(v) => Some(v.to_owned()),
-                LabelOrOpCode::Get(v) => Some(v.to_owned()),
+                LabelOrOpCode::Extcall(v) | LabelOrOpCode::Funcall(v) => Some(v.to_owned()),
                 _ => None,
             })
             .filter(|v| !index.contains(v.as_ref()))
@@ -286,6 +332,13 @@ impl Compiler {
         //
         funcalls.into_iter().try_for_each(|v| {
             //
+            // Bail-out if the funcall is an external call.
+            //
+            if self.exfuns.contains_key(&v) {
+                index.insert(v.into_string());
+                return Ok(());
+            }
+            //
             // Grab the block.
             //
             let Some((_, ctxt)) = self.blocks.iter().find(|(k, _)| k == &v) else {
@@ -294,11 +347,11 @@ impl Compiler {
             //
             // Process the block.
             //
-            self.collect_live_defuns_for_context(v.as_ref(), ctxt, index)
+            self.collect_liveset_for_context(v.as_ref(), ctxt, index)
         })
     }
 
-    fn collect_live_defuns(&self) -> Result<Option<HashSet<String>>, Error> {
+    fn collect_liveset(&self) -> Result<Option<HashSet<String>>, Error> {
         let mut result = HashSet::new();
         //
         // Grab the main block.
@@ -309,7 +362,7 @@ impl Compiler {
         //
         // Collect the funcalls.
         //
-        self.collect_live_defuns_for_context(name.as_ref(), ctxt, &mut result)?;
+        self.collect_liveset_for_context(name.as_ref(), ctxt, &mut result)?;
         //
         // Done.
         //
@@ -324,6 +377,7 @@ impl Compiler {
 impl Compiler {
     fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
         match stmt {
+            TopLevelStatement::External(_, v) => self.compile_external(v),
             TopLevelStatement::Function(_, v) => self.compile_function(v, false),
             TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
             TopLevelStatement::Use(_, v) => self.load_modules(v),
@@ -411,6 +465,7 @@ impl Compiler {
         //
         if let Some(items) = _items {
             stmts.retain(|v| match v {
+                TopLevelStatement::External(_, v) => items.contains(&v.name().as_ref()),
                 TopLevelStatement::Function(_, v) | TopLevelStatement::Macro(_, v) => {
                     items.contains(&v.name().as_ref())
                 }
@@ -429,6 +484,21 @@ impl Compiler {
 //
 
 impl Compiler {
+    fn compile_external(&mut self, exfun: ExternalDefinition) -> Result<(), Error> {
+        //
+        // Add the external function to the defuns.
+        //
+        self.defuns.insert(exfun.name().clone(), exfun.arity());
+        //
+        // Track the external function.
+        //
+        self.exfuns.insert(exfun.name().clone(), exfun);
+        //
+        // Done.
+        //
+        Ok(())
+    }
+
     fn compile_function(&mut self, defun: FunctionDefinition, is_macro: bool) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
@@ -832,9 +902,17 @@ impl Compiler {
                     Ok(())
                 })?;
                 //
+                // Determine the type of funcall.
+                //
+                let funcall = if self.exfuns.contains_key(&name) {
+                    LabelOrOpCode::Extcall(name.clone())
+                } else {
+                    LabelOrOpCode::Funcall(name.clone())
+                };
+                //
                 // Inject the funcall.
                 //
-                ctxt.stream.push_back(LabelOrOpCode::Funcall(name.clone()));
+                ctxt.stream.push_back(funcall);
                 ctxt.stackn += 1;
                 //
                 // Pack the closure.
@@ -884,7 +962,9 @@ impl Compiler {
                     //
                     // String.
                     //
+                    Operator::Bytes => OpCode::Bytes.into(),
                     Operator::Str => OpCode::Str.into(),
+                    Operator::Unpack => OpCode::Unpack.into(),
                     //
                     // Predicates.
                     //
@@ -900,25 +980,6 @@ impl Compiler {
                 // Push the opcode.
                 //
                 ctxt.stream.push_back(opcode);
-                //
-                // Update the stack.
-                //
-                ctxt.stackn += 1;
-                //
-                // Done.
-                //
-                Ok(())
-            }
-            Statement::SysCall(_, sym) => {
-                //
-                // Get the syscall parameters.
-                //
-                let (index, argcnt) = syscalls::get(sym)?;
-                //
-                // Push the opcode.
-                //
-                let syscall = Immediate::Syscall(index, argcnt);
-                ctxt.stream.push_back(OpCode::Psh(syscall).into());
                 //
                 // Update the stack.
                 //
@@ -1144,13 +1205,14 @@ impl Compiler {
         }
     }
 
-    fn compile_symbol(&mut self, ctxt: &mut Context, symbol: &Box<str>) -> Result<(), Error> {
+    fn compile_symbol(&mut self, ctxt: &mut Context, sym: &Box<str>) -> Result<(), Error> {
         //
         // Get the opcode.
         //
-        let opcode = match ctxt.locals.get(symbol).and_then(|v| v.last()) {
+        let opcode = match ctxt.locals.get(sym).and_then(|v| v.last()) {
             Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
-            None => LabelOrOpCode::Get(symbol.clone()),
+            None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
+            None => LabelOrOpCode::Funcall(sym.clone()),
         };
         //
         // Push the opcode.
@@ -1175,6 +1237,25 @@ impl Compiler {
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
             Value::Number(v) => OpCode::Psh(Immediate::Number(*v)).into(),
+            Value::String(v) => {
+                //
+                // Push the terminating nil.
+                //
+                let opcode = OpCode::Psh(Immediate::Nil).into();
+                ctxt.stream.push_back(opcode);
+                //
+                // Build the list of chars.
+                //
+                v.bytes().rev().for_each(|v| {
+                    let imm = Immediate::Char(v);
+                    ctxt.stream.push_back(OpCode::Psh(imm).into());
+                    ctxt.stream.push_back(OpCode::Cons.into());
+                });
+                //
+                // Create the string.
+                //
+                OpCode::Str.into()
+            }
             Value::Wildcard => OpCode::Psh(Immediate::Wildcard).into(),
         };
         //
