@@ -967,6 +967,13 @@ impl Compiler {
                     Operator::Not => OpCode::Not.into(),
                     Operator::Or => OpCode::Or.into(),
                     //
+                    // Bits.
+                    //
+                    Operator::BitAnd => OpCode::BitAnd.into(),
+                    Operator::BitNot => OpCode::BitNot.into(),
+                    Operator::BitOr => OpCode::BitOr.into(),
+                    Operator::BitXor => OpCode::BitXor.into(),
+                    //
                     // List.
                     //
                     Operator::Car => OpCode::Car.into(),

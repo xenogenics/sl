@@ -230,6 +230,17 @@ pub enum Operator {
     #[strum(serialize = "or")]
     Or,
     //
+    // Bits.
+    //
+    #[strum(serialize = "bitand")]
+    BitAnd,
+    #[strum(serialize = "bitnot")]
+    BitNot,
+    #[strum(serialize = "bitor")]
+    BitOr,
+    #[strum(serialize = "bitxor")]
+    BitXor,
+    //
     // List operations.
     //
     #[strum(serialize = "car")]
@@ -284,6 +295,10 @@ impl Operator {
             Operator::Neq => 2,
             Operator::Not => 1,
             Operator::Or => 2,
+            Operator::BitAnd => 2,
+            Operator::BitNot => 1,
+            Operator::BitOr => 2,
+            Operator::BitXor => 2,
             Operator::Car => 1,
             Operator::Cdr => 1,
             Operator::Conc => 2,

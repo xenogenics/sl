@@ -60,6 +60,12 @@ impl From<bool> for Immediate {
     }
 }
 
+impl From<i64> for Immediate {
+    fn from(value: i64) -> Self {
+        Self::Number(value)
+    }
+}
+
 //
 // Opcodes.
 //
@@ -86,6 +92,13 @@ pub enum OpCode {
     Neq,
     Not,
     Or,
+    //
+    // Bit operations.
+    //
+    BitAnd,
+    BitNot,
+    BitOr,
+    BitXor,
     //
     // List operations.
     //

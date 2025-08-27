@@ -147,6 +147,28 @@ impl VirtualMachine {
                     self.stack.push(Value::Immediate((!a || !b).into()));
                 }
                 //
+                // Bits.
+                //
+                OpCode::BitAnd => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    self.stack.push(Value::Immediate((a & b).into()));
+                }
+                OpCode::BitNot => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    self.stack.push(Value::Immediate((!a).into()));
+                }
+                OpCode::BitOr => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    self.stack.push(Value::Immediate((a | b).into()));
+                }
+                OpCode::BitXor => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    self.stack.push(Value::Immediate((a ^ b).into()));
+                }
+                //
                 // List operations.
                 //
                 OpCode::Car => {
