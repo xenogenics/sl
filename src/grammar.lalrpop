@@ -15,6 +15,7 @@ match {
 	"(", ")", ".", "`", "'", ",", ",@", "~",
 	r"\^([!-\[]|[\]-~]|\\\\|\\e|\\n|\\r|\\t)" => Char,
 	r"-?[0-9]+" => Number,
+	r"x[0-9A-F]+" => HexNumber,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
 	"nil" => Nil,
 	"T" => True,
@@ -75,11 +76,12 @@ Atom: Rc<Atom> = {
 }
 
 Terminal: Rc<Atom> = {
-	Char     => Atom::char(<>.as_bytes()[1]),
-	Number   => Atom::number(<>.parse().unwrap()),
-	String   => Atom::string(<>),
-	Symbol   => Atom::symbol(<>),
-	Nil      => Atom::nil(),
-	True     => Atom::t(),
-	Wildcard => Atom::wildcard(),
+	Char      => Atom::char(<>.as_bytes()[1]),
+	Number    => Atom::number(<>.parse().unwrap()),
+	HexNumber => Atom::number(i64::from_str_radix(&<>[1..], 16).unwrap()), 
+	String    => Atom::string(<>),
+	Symbol    => Atom::symbol(<>),
+	Nil       => Atom::nil(),
+	True      => Atom::t(),
+	Wildcard  => Atom::wildcard(),
 }

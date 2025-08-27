@@ -1,22 +1,4 @@
-(use '(iterators take)) 
-
-(val READ_ONLY 0)
-
-(ext open nil ((path  . string)
-               (flags . integer)
-               (mode  . integer))
-  "Open or create a file at PATH with FLAGS and MODE."
-  integer)
-
-(ext read nil ((fd  . integer)
-               (buf . bytes)
-               (len . integer))
-  "Attempt to read LEN from FD into BUF."
-  integer)
-
-(ext close nil ((fd . integer))
-  "Close the file descriptor FD."
-  void)
+(use 'io '(iterators take)) 
 
 (def main ()
   (let ((fd  . (open "/tmp/hello" READ_ONLY 0))
