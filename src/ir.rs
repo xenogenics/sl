@@ -946,6 +946,7 @@ impl Statements {
 
 #[derive(Debug)]
 pub enum TopLevelStatement {
+    Constant(Rc<Atom>, ConstantDefinition),
     External(Rc<Atom>, ExternalDefinition),
     Function(Rc<Atom>, FunctionDefinition),
     Macro(Rc<Atom>, FunctionDefinition),
@@ -968,6 +969,7 @@ impl TopLevelStatement {
                 def.statements()
             }
             TopLevelStatement::Use(_, stmts) => stmts,
+            TopLevelStatement::Constant(..) => panic!("Constant has no statement"),
         }
     }
 
@@ -1004,6 +1006,10 @@ impl TopLevelStatement {
                 let val = Statements::from_atom(rem.clone(), macros)?;
                 Ok(Self::Use(atom, val))
             }
+            "val" => {
+                let val = ConstantDefinition::from_atom(rem.clone(), macros)?;
+                Ok(Self::Constant(atom, val))
+            }
             _ => Err(Error::ExpectedTopLevelStatement),
         }
     }
@@ -1012,7 +1018,8 @@ impl TopLevelStatement {
 impl Display for TopLevelStatement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TopLevelStatement::External(atom, _)
+            TopLevelStatement::Constant(atom, _)
+            | TopLevelStatement::External(atom, _)
             | TopLevelStatement::Function(atom, _)
             | TopLevelStatement::Macro(atom, _)
             | TopLevelStatement::Use(atom, _) => write!(f, "{atom}"),
@@ -1195,5 +1202,55 @@ impl FunctionDefinition {
         // Done.
         //
         Ok(Self(name.clone(), args, stmts))
+    }
+}
+
+//
+// Value definition.
+//
+
+#[derive(Debug)]
+pub struct ConstantDefinition(Box<str>, Value);
+
+impl ConstantDefinition {
+    pub fn new(name: Box<str>, value: Value) -> Self {
+        Self(name, value)
+    }
+
+    pub fn name(&self) -> &Box<str> {
+        &self.0
+    }
+
+    pub fn value(&self) -> &Value {
+        &self.1
+    }
+
+    pub fn from_atom(atom: Rc<Atom>, _: &HashSet<Box<str>>) -> Result<Self, Error> {
+        //
+        // Extract the value name.
+        //
+        let Atom::Pair(name, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Make sure the value name is a symbol.
+        //
+        let Atom::Symbol(name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol);
+        };
+        //
+        // Extract the value.
+        //
+        let Atom::Pair(value, _) = rem.as_ref() else {
+            return Err(Error::ExpectedPair);
+        };
+        //
+        // Build the value.
+        //
+        let value = Value::try_from(value.clone())?;
+        //
+        // Done.
+        //
+        Ok(Self(name.clone(), value))
     }
 }

@@ -11,8 +11,8 @@ use crate::{
     error::Error,
     grammar::ListsParser,
     ir::{
-        Arguments, Backquote, ExternalDefinition, FunctionDefinition, Location, Operator, Quote,
-        Statement, Statements, TopLevelStatement, Value,
+        Arguments, Backquote, ConstantDefinition, ExternalDefinition, FunctionDefinition, Location,
+        Operator, Quote, Statement, Statements, TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
     vm::VirtualMachine,
@@ -145,6 +145,7 @@ pub trait CompilerTrait: Clone {
 
 #[derive(Clone, Default)]
 pub struct Compiler {
+    consts: HashMap<Box<str>, Value>,
     blocks: Vec<(Box<str>, Context)>,
     defuns: HashMap<Box<str>, Arity>,
     macros: HashSet<Box<str>>,
@@ -377,6 +378,7 @@ impl Compiler {
 impl Compiler {
     fn load_statement(&mut self, stmt: TopLevelStatement) -> Result<(), Error> {
         match stmt {
+            TopLevelStatement::Constant(_, v) => self.compile_constant(v),
             TopLevelStatement::External(_, v) => self.compile_external(v),
             TopLevelStatement::Function(_, v) => self.compile_function(v, false),
             TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
@@ -465,6 +467,7 @@ impl Compiler {
         //
         if let Some(items) = _items {
             stmts.retain(|v| match v {
+                TopLevelStatement::Constant(_, v) => items.contains(&v.name().as_ref()),
                 TopLevelStatement::External(_, v) => items.contains(&v.name().as_ref()),
                 TopLevelStatement::Function(_, v) | TopLevelStatement::Macro(_, v) => {
                     items.contains(&v.name().as_ref())
@@ -484,6 +487,17 @@ impl Compiler {
 //
 
 impl Compiler {
+    fn compile_constant(&mut self, val: ConstantDefinition) -> Result<(), Error> {
+        //
+        // Track the constant.
+        //
+        self.consts.insert(val.name().clone(), val.value().clone());
+        //
+        // Done.
+        //
+        Ok(())
+    }
+
     fn compile_external(&mut self, exfun: ExternalDefinition) -> Result<(), Error> {
         //
         // Add the external function to the defuns.
@@ -1211,6 +1225,10 @@ impl Compiler {
         //
         let opcode = match ctxt.locals.get(sym).and_then(|v| v.last()) {
             Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
+            None if self.consts.contains_key(sym) => {
+                let value = self.consts.get(sym).unwrap();
+                Self::value_opcode(ctxt, value)
+            }
             None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
             None => LabelOrOpCode::Funcall(sym.clone()),
         };
@@ -1229,10 +1247,14 @@ impl Compiler {
     }
 
     fn compile_value(ctxt: &mut Context, value: &Value) -> Result<(), Error> {
-        //
-        // Get the opcode.
-        //
-        let opcode = match value {
+        let opcode = Self::value_opcode(ctxt, value);
+        ctxt.stream.push_back(opcode);
+        ctxt.stackn += 1;
+        Ok(())
+    }
+
+    fn value_opcode(ctxt: &mut Context, value: &Value) -> LabelOrOpCode {
+        match value {
             Value::Nil => OpCode::Psh(Immediate::Nil).into(),
             Value::True => OpCode::Psh(Immediate::True).into(),
             Value::Char(v) => OpCode::Psh(Immediate::Char(*v)).into(),
@@ -1257,19 +1279,7 @@ impl Compiler {
                 OpCode::Str.into()
             }
             Value::Wildcard => OpCode::Psh(Immediate::Wildcard).into(),
-        };
-        //
-        // Push the opcode.
-        //
-        ctxt.stream.push_back(opcode);
-        //
-        // Update the stack tracker.
-        //
-        ctxt.stackn += 1;
-        //
-        // Done.
-        //
-        Ok(())
+        }
     }
 }
 

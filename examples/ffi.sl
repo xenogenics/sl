@@ -1,5 +1,7 @@
 (use '(iterators take)) 
 
+(val READ_ONLY 0)
+
 (ext open nil ((path  . string)
                (flags . integer)
                (mode  . integer))
@@ -17,10 +19,10 @@
   void)
 
 (def main ()
-  (let ((fd  . (open "/tmp/hello" 0 0))
+  (let ((fd  . (open "/tmp/hello" READ_ONLY 0))
         (buf . (bytes 8))
         (res . (read fd buf 8)))
     (close fd)
     `(,res ,(str (take (- res 1) (unpack buf))))
   ))
-           
+          
