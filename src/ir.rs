@@ -62,14 +62,14 @@ impl Arguments {
         /*
          * Split the atom.
          */
-        let Atom::Pair(car, cdr) = atom.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, car, cdr) = atom.as_ref() else {
+            return Err(Error::ExpectedPair(atom.span()));
         };
         /*
          * Make sure CAR is a symbol.
          */
-        let Atom::Symbol(symbol) = car.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, symbol) = car.as_ref() else {
+            return Err(Error::ExpectedSymbol(car.span()));
         };
         /*
          * Save the symbol.
@@ -79,10 +79,10 @@ impl Arguments {
          * Check CDR.
          */
         match cdr.as_ref() {
-            Atom::Nil => Ok(Self::List(syms)),
+            Atom::Nil(_) => Ok(Self::List(syms)),
             Atom::Pair(..) => Self::from_pair(cdr.clone(), syms),
-            Atom::Symbol(v) => Ok(Self::ListAndCapture(syms, v.clone())),
-            _ => Err(Error::ExpectedPairOrSymbol),
+            Atom::Symbol(_, v) => Ok(Self::ListAndCapture(syms, v.clone())),
+            _ => Err(Error::ExpectedPairOrSymbol(cdr.span())),
         }
     }
 }
@@ -92,10 +92,10 @@ impl TryFrom<Rc<Atom>> for Arguments {
 
     fn try_from(value: Rc<Atom>) -> Result<Self, Error> {
         match value.as_ref() {
-            Atom::Nil => Ok(Arguments::None),
+            Atom::Nil(_) => Ok(Arguments::None),
             Atom::Pair(..) => Self::from_pair(value, Vec::new()),
-            Atom::Symbol(v) => Ok(Arguments::Capture(v.clone())),
-            _ => Err(Error::ExpectedPairOrSymbol),
+            Atom::Symbol(_, v) => Ok(Arguments::Capture(v.clone())),
+            _ => Err(Error::ExpectedPairOrSymbol(value.span())),
         }
     }
 }
@@ -123,8 +123,8 @@ impl TryFrom<Rc<Atom>> for ExternalType {
         //
         // Make sure we have a symbol.
         //
-        let Atom::Symbol(sym) = value.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, sym) = value.as_ref() else {
+            return Err(Error::ExpectedSymbol(value.span()));
         };
         //
         // Convert the symbol name to a type.
@@ -154,7 +154,7 @@ impl TryFrom<Rc<Atom>> for ExternalArguments {
         // Make sure we have a pair.
         //
         if !value.is_pair() {
-            return Err(Error::ExpectedPair);
+            return Err(Error::ExpectedPair(value.span()));
         }
         //
         // Build the argument list.
@@ -165,14 +165,14 @@ impl TryFrom<Rc<Atom>> for ExternalArguments {
                 //
                 // Make sure we have a pair.
                 //
-                let Atom::Pair(name, ftyp) = v.as_ref() else {
-                    return Err(Error::ExpectedPair);
+                let Atom::Pair(_, name, ftyp) = v.as_ref() else {
+                    return Err(Error::ExpectedPair(v.span()));
                 };
                 //
                 // Make sure the argument name is a symbol.
                 //
-                let Atom::Symbol(name) = name.as_ref() else {
-                    return Err(Error::ExpectedSymbol);
+                let Atom::Symbol(_, name) = name.as_ref() else {
+                    return Err(Error::ExpectedSymbol(name.span()));
                 };
                 //
                 // Parse the foreign type.
@@ -337,13 +337,13 @@ impl TryFrom<Rc<Atom>> for Value {
 
     fn try_from(atom: Rc<Atom>) -> Result<Self, Self::Error> {
         match atom.as_ref() {
-            Atom::Nil => Ok(Self::Nil),
-            Atom::True => Ok(Self::True),
-            Atom::Char(v) => Ok(Self::Char(*v)),
-            Atom::Number(v) => Ok(Self::Number(*v)),
-            Atom::String(v) => Ok(Self::String(v.clone())),
-            Atom::Pair(..) | Atom::Symbol(_) => Err(Error::ExpectedValue),
-            Atom::Wildcard => Ok(Self::Wildcard),
+            Atom::Nil(_) => Ok(Self::Nil),
+            Atom::True(_) => Ok(Self::True),
+            Atom::Char(_, v) => Ok(Self::Char(*v)),
+            Atom::Number(_, v) => Ok(Self::Number(*v)),
+            Atom::String(_, v) => Ok(Self::String(v.clone())),
+            Atom::Pair(..) | Atom::Symbol(..) => Err(Error::ExpectedValue(atom.span())),
+            Atom::Wildcard(_) => Ok(Self::Wildcard),
         }
     }
 }
@@ -353,7 +353,7 @@ impl TryFrom<Rc<Atom>> for Value {
 //
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Location {
+pub enum CallSite {
     Any,
     Tail,
 }
@@ -384,19 +384,19 @@ impl Backquote {
 impl Backquote {
     fn from_atom(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         match value.as_ref() {
-            Atom::Pair(car, cdr) => {
+            Atom::Pair(_, car, cdr) => {
                 let car = Self::from_unquote(car.clone(), macros)?;
                 let cdr = Self::from_unquote(cdr.clone(), macros)?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            Atom::Symbol(_, v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
     }
 
     fn from_unquote(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
-        if let Atom::Pair(car, cdr) = value.as_ref()
-            && let Atom::Symbol(v) = car.as_ref()
+        if let Atom::Pair(_, car, cdr) = value.as_ref()
+            && let Atom::Symbol(_, v) = car.as_ref()
         {
             match v.as_ref() {
                 "backquote" => {
@@ -456,12 +456,12 @@ impl TryFrom<Rc<Atom>> for Quote {
 
     fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
         match value.as_ref() {
-            Atom::Pair(car, cdr) => {
+            Atom::Pair(_, car, cdr) => {
                 let car = Self::try_from(car.clone())?;
                 let cdr = Self::try_from(cdr.clone())?;
                 Ok(Self::Pair(car.into(), cdr.into()))
             }
-            Atom::Symbol(v) => Ok(Self::Symbol(v.clone())),
+            Atom::Symbol(_, v) => Ok(Self::Symbol(v.clone())),
             _ => value.try_into().map(Self::Value),
         }
     }
@@ -493,7 +493,7 @@ pub enum Statement {
     //
     // Function application.
     //
-    Apply(Rc<Atom>, Box<Statement>, Statements, Location),
+    Apply(Rc<Atom>, Box<Statement>, Statements, CallSite),
     Expand(Rc<Atom>, Box<str>, Statements),
     Lambda(Rc<Atom>, Arguments, Statements),
     Operator(Rc<Atom>, Operator),
@@ -606,7 +606,7 @@ impl Statement {
     pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
         match atom.as_ref() {
             Atom::Pair(..) => Self::from_pair(atom.clone(), macros),
-            Atom::Symbol(sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
+            Atom::Symbol(_, sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
             _ => {
                 let val = Value::try_from(atom.clone())?;
                 Ok(Self::Value(atom, val))
@@ -618,7 +618,7 @@ impl Statement {
         //
         // Split the atom.
         //
-        let Atom::Pair(sym, rem) = atom.as_ref() else {
+        let Atom::Pair(_, sym, rem) = atom.as_ref() else {
             unreachable!();
         };
         //
@@ -628,7 +628,7 @@ impl Statement {
             //
             // For symbols, check its value for built-ins.
             //
-            Atom::Symbol(name) => match name.as_ref() {
+            Atom::Symbol(_, name) => match name.as_ref() {
                 //
                 // Quote: quasiquote.
                 //
@@ -646,8 +646,8 @@ impl Statement {
                 //
                 // Quote: unquote.
                 //
-                "unquote" => Err(Error::UnquoteOutsideBackquote),
-                "unquote-splice" => Err(Error::UnquoteOutsideBackquote),
+                "unquote" => Err(Error::UnquoteOutsideBackquote(atom.span())),
+                "unquote-splice" => Err(Error::UnquoteOutsideBackquote(atom.span())),
                 //
                 // Control flow: if.
                 //
@@ -655,8 +655,8 @@ impl Statement {
                     //
                     // Unpack the condition.
                     //
-                    let Atom::Pair(cond, args) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
+                    let Atom::Pair(_, cond, args) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair(rem.span()));
                     };
                     //
                     // Parse the condition.
@@ -665,8 +665,8 @@ impl Statement {
                     //
                     // Unpack THEN.
                     //
-                    let Atom::Pair(then, args) = args.as_ref() else {
-                        return Err(Error::ExpectedPair);
+                    let Atom::Pair(_, then, args) = args.as_ref() else {
+                        return Err(Error::ExpectedPair(args.span()));
                     };
                     //
                     // Parse THEN.
@@ -676,12 +676,12 @@ impl Statement {
                     // Unpack ELSE.
                     //
                     let else_ = match args.as_ref() {
-                        Atom::Nil => None,
-                        Atom::Pair(else_, _) => {
+                        Atom::Nil(_) => None,
+                        Atom::Pair(_, else_, _) => {
                             let v = Statement::from_atom(else_.clone(), macros)?;
                             Some(Box::new(v))
                         }
-                        _ => return Err(Error::ExpectedPair),
+                        _ => return Err(Error::ExpectedPair(args.span())),
                     };
                     //
                     // Done.
@@ -695,8 +695,8 @@ impl Statement {
                     //
                     // Split the atom.
                     //
-                    let Atom::Pair(bindings, stmts) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
+                    let Atom::Pair(_, bindings, stmts) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair(rem.span()));
                     };
                     //
                     // Parse the bindings.
@@ -707,14 +707,14 @@ impl Statement {
                             //
                             // Make sure the binding is a pair.
                             //
-                            let Atom::Pair(symbol, stmt) = v.as_ref() else {
-                                return Err(Error::ExpectedPair);
+                            let Atom::Pair(_, symbol, stmt) = v.as_ref() else {
+                                return Err(Error::ExpectedPair(v.span()));
                             };
                             //
                             // Make sure the symbol is a symbol.
                             //
-                            let Atom::Symbol(symbol) = symbol.as_ref() else {
-                                return Err(Error::ExpectedSymbol);
+                            let Atom::Symbol(_, symbol) = symbol.as_ref() else {
+                                return Err(Error::ExpectedSymbol(symbol.span()));
                             };
                             //
                             // Parse the statement.
@@ -746,8 +746,8 @@ impl Statement {
                     //
                     // Split the lambda call.
                     //
-                    let Atom::Pair(args, rem) = rem.as_ref() else {
-                        return Err(Error::ExpectedPair);
+                    let Atom::Pair(_, args, rem) = rem.as_ref() else {
+                        return Err(Error::ExpectedPair(rem.span()));
                     };
                     //
                     // Build the argument list.
@@ -786,13 +786,14 @@ impl Statement {
                         }
                         //
                         // Otherwise, generate a symbol call.
+                        //
                         else {
                             Box::new(Statement::Symbol(sym.clone(), name.clone()))
                         };
                         //
                         // Done.
                         //
-                        Ok(Self::Apply(atom, stmt, stmts, Location::Any))
+                        Ok(Self::Apply(atom, stmt, stmts, CallSite::Any))
                     }
                     Err(_) if macros.contains(v) => {
                         let stmts = Statements::from_atom(rem.clone(), macros)?;
@@ -801,7 +802,7 @@ impl Statement {
                     Err(_) => {
                         let stmt = Box::new(Statement::Symbol(sym.clone(), name.clone()));
                         let stmts = Statements::from_atom(rem.clone(), macros)?;
-                        Ok(Self::Apply(atom, stmt, stmts, Location::Any))
+                        Ok(Self::Apply(atom, stmt, stmts, CallSite::Any))
                     }
                 },
             },
@@ -811,7 +812,7 @@ impl Statement {
             _ => {
                 let car = Statement::from_atom(sym.clone(), macros).map(Box::new)?;
                 let cdr = Statements::from_atom(rem.clone(), macros)?;
-                Ok(Self::Apply(atom, car, cdr, Location::Any))
+                Ok(Self::Apply(atom, car, cdr, CallSite::Any))
             }
         }
     }
@@ -852,7 +853,7 @@ impl Statement {
                 if let Statement::Symbol(_, v) = stmt.as_ref()
                     && name == v.as_ref()
                 {
-                    *location = Location::Tail;
+                    *location = CallSite::Tail;
                 }
             }
             Statement::IfThenElse(_, _, then, else_) => {
@@ -874,7 +875,7 @@ impl Statement {
 
     pub fn is_tail_call(&self) -> bool {
         match self {
-            Statement::Apply(_, _, _, Location::Tail) => true,
+            Statement::Apply(_, _, _, CallSite::Tail) => true,
             Statement::IfThenElse(_, _, then, else_) => {
                 then.is_tail_call()
                     && else_
@@ -992,14 +993,14 @@ impl TopLevelStatement {
         //
         // Split the function call.
         //
-        let Atom::Pair(sym, rem) = atom.as_ref() else {
-            return Err(Error::ExpectedFunctionCall);
+        let Atom::Pair(_, sym, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedFunctionCall(atom.span()));
         };
         //
         // Get the function symbol.
         //
-        let Atom::Symbol(name) = sym.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, name) = sym.as_ref() else {
+            return Err(Error::ExpectedSymbol(sym.span()));
         };
         //
         // Process the top-level statement.
@@ -1025,7 +1026,7 @@ impl TopLevelStatement {
                 let val = ConstantDefinition::from_atom(rem.clone(), macros)?;
                 Ok(Self::Constant(atom, val))
             }
-            _ => Err(Error::ExpectedTopLevelStatement),
+            _ => Err(Error::ExpectedTopLevelStatement(sym.span())),
         }
     }
 }
@@ -1074,34 +1075,34 @@ impl ExternalDefinition {
         //
         // Extract the function name.
         //
-        let Atom::Pair(name, rem) = atom.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, name, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair(atom.span()));
         };
         //
         // Make sure the function name is a symbol.
         //
-        let Atom::Symbol(name) = name.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol(name.span()));
         };
         //
         // Extract the symbol name.
         //
-        let Atom::Pair(symbol, rem) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, symbol, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Check the symbol name.
         //
         let symbol = match symbol.as_ref() {
-            Atom::Symbol(v) => v.clone(),
-            Atom::Nil => name.clone(),
-            _ => return Err(Error::ExpectedSymbol),
+            Atom::Symbol(_, v) => v.clone(),
+            Atom::Nil(_) => name.clone(),
+            _ => return Err(Error::ExpectedSymbol(symbol.span())),
         };
         //
         // Extract the arguments.
         //
-        let Atom::Pair(args, rem) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, args, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Build the argument list.
@@ -1110,21 +1111,21 @@ impl ExternalDefinition {
         //
         // Check if there is a comment.
         //
-        let Atom::Pair(maybe_comment, return_type) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, maybe_comment, return_type) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Skip the comment if any.
         //
         let rem = match maybe_comment.as_ref() {
-            Atom::String(_) => return_type,
+            Atom::String(..) => return_type,
             _ => rem,
         };
         //
         // Get the return type.
         //
-        let Atom::Pair(return_type, _) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, return_type, _) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Get the return type.
@@ -1173,20 +1174,20 @@ impl FunctionDefinition {
         //
         // Extract the function name.
         //
-        let Atom::Pair(name, rem) = atom.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, name, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair(atom.span()));
         };
         //
         // Make sure the function name is a symbol.
         //
-        let Atom::Symbol(name) = name.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol(name.span()));
         };
         //
         // Extract the arguments.
         //
-        let Atom::Pair(args, rem) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, args, rem) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Build the argument list.
@@ -1195,14 +1196,14 @@ impl FunctionDefinition {
         //
         // Check if there is a comment.
         //
-        let Atom::Pair(maybe_comment, statements) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, maybe_comment, statements) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Skip the comment if any.
         //
         let rem = match maybe_comment.as_ref() {
-            Atom::Nil | Atom::String(_) => statements,
+            Atom::Nil(_) | Atom::String(..) => statements,
             _ => rem,
         };
         //
@@ -1244,20 +1245,20 @@ impl ConstantDefinition {
         //
         // Extract the value name.
         //
-        let Atom::Pair(name, rem) = atom.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, name, rem) = atom.as_ref() else {
+            return Err(Error::ExpectedPair(atom.span()));
         };
         //
         // Make sure the value name is a symbol.
         //
-        let Atom::Symbol(name) = name.as_ref() else {
-            return Err(Error::ExpectedSymbol);
+        let Atom::Symbol(_, name) = name.as_ref() else {
+            return Err(Error::ExpectedSymbol(name.span()));
         };
         //
         // Extract the value.
         //
-        let Atom::Pair(value, _) = rem.as_ref() else {
-            return Err(Error::ExpectedPair);
+        let Atom::Pair(_, value, _) = rem.as_ref() else {
+            return Err(Error::ExpectedPair(rem.span()));
         };
         //
         // Build the value.

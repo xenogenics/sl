@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use lalrpop_util::ParseError;
 
-use crate::atom::Atom;
+use crate::atom::{Atom, Span};
 use crate::compiler::CompilerTrait;
 
 grammar<C>(compiler: &mut C) where C: CompilerTrait;
@@ -39,9 +39,15 @@ pub Lists: Vec<Rc<Atom>> = {
 }
 
 List: Rc<Atom> = {
-	"(" ")"                                => Atom::nil(),
-	"(" <v:Terms> ")"                      => v,
-	"(" <v:Terms> "." <w:UnquotedTerm> ")" => Atom::conc(v, w),
+	<start:@L> "(" ")" <end:@R> => {
+		Atom::nil().with_span(Span::Offset(start, end))
+	},
+	<start:@L> "(" <v:Terms> ")" <end:@R> => {
+		v.with_span(Span::Offset(start, end))
+	},
+	<start:@L> "(" <v:Terms> "." <w:UnquotedTerm> ")" <end:@R> => {
+		Atom::conc(v, w).with_span(Span::Offset(start, end))
+	},
 }
 
 Terms: Rc<Atom> = {
@@ -54,25 +60,37 @@ Terms: Rc<Atom> = {
 		let expr = compiler.clone().eval(e).map_err(|error| ParseError::User { error })?;
 		Ok(Atom::conc(expr, v))
 	},
-    <e:UnquotedTerm>           => Atom::cons(e, Atom::nil()),
-    <e:UnquotedTerm> <v:Terms> => Atom::cons(e, v),
+	<start:@L> <e:UnquotedTerm> <end:@R> => {
+		Atom::cons(e, Atom::nil()).with_span(Span::Offset(start, end))
+	},
+	<start:@L> <e:UnquotedTerm> <v:Terms> <end:@R> => {
+		Atom::cons(e, v).with_span(Span::Offset(start, end))
+	},
 }
 
 UnquotedTerm: Rc<Atom> = {
-	","  <e:Term> => Atom::cons(Atom::symbol("unquote"), e),
-	",@" <e:Term> => Atom::cons(Atom::symbol("unquote-splice"), e),
-		 <e:Term> => e,
+	<start:@L> ","  <e:Term> <end:@R> => {
+		Atom::cons(Atom::symbol("unquote"), e).with_span(Span::Offset(start, end))
+	},
+	<start:@L> ",@" <e:Term> <end:@R> => {
+		Atom::cons(Atom::symbol("unquote-splice"), e).with_span(Span::Offset(start, end))
+	},
+	<e:Term> => e,
 }
 
 Term: Rc<Atom> = {
-	"`" <e:Atom> => Atom::cons(Atom::symbol("backquote"), e),
-	"'" <e:Atom> => Atom::cons(Atom::symbol("quote"), e),
-		<e:Atom> => e,
+	<start:@L> "`" <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("backquote"), e).with_span(Span::Offset(start, end))
+	},
+	<start:@L> "'" <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("quote"), e).with_span(Span::Offset(start, end))
+	},
+	<e:Atom> => e,
 }
 
 Atom: Rc<Atom> = {
-	<e:List>     => e,
-	<e:Terminal> => e,
+	<e:List>                         => e,
+	<start:@R> <e:Terminal> <end:@R> => e.with_span(Span::Offset(start, end)),
 }
 
 Terminal: Rc<Atom> = {

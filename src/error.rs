@@ -2,34 +2,36 @@ use std::env::VarError;
 
 use thiserror::Error;
 
+use crate::atom::Span;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
     Environment(#[from] VarError),
     #[error("Expected function call")]
-    ExpectedFunctionCall,
+    ExpectedFunctionCall(Span),
     #[error("Expected function definition")]
-    ExpectedFunctionDefinition,
+    ExpectedFunctionDefinition(Span),
     #[error("Expected lambda definition")]
-    ExpectedLambdaDefinition,
+    ExpectedLambdaDefinition(Span),
     #[error("Expected module load")]
-    ExpectedModuleLoad,
+    ExpectedModuleLoad(Span),
     #[error("Expected pair")]
-    ExpectedPair,
+    ExpectedPair(Span),
     #[error("Expected pair or immediate")]
-    ExpectedPairOrImmediate,
+    ExpectedPairOrImmediate(Span),
     #[error("Expected pair or symbol")]
-    ExpectedPairOrSymbol,
+    ExpectedPairOrSymbol(Span),
     #[error("Expected quote")]
-    ExpectedQuote,
+    ExpectedQuote(Span),
     #[error("Expected statement")]
-    ExpectedStatement,
+    ExpectedStatement(Span),
     #[error("Expected symbol")]
-    ExpectedSymbol,
+    ExpectedSymbol(Span),
     #[error("Expected top-level statement (def or load)")]
-    ExpectedTopLevelStatement,
+    ExpectedTopLevelStatement(Span),
     #[error("Expected value")]
-    ExpectedValue,
+    ExpectedValue(Span),
     #[error("Function already defined: {0}")]
     FunctionAlreadyDefined(Box<str>),
     #[error("Function definition can only happen at the top level")]
@@ -61,7 +63,7 @@ pub enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("Unquote outside backquote context")]
-    UnquoteOutsideBackquote,
+    UnquoteOutsideBackquote(Span),
     #[error("Unresolved symbol: {0}")]
     UnresolvedSymbol(Box<str>),
 }

@@ -2,14 +2,16 @@
 
 (mac |> (val . lst)
   "Evaluate the first element of LST with VAL and pass down the result."
-  (foldl (\ (acc elt) (elt acc)) val lst))
+  (foldl
+    (\ (acc elt) (cons elt (cons acc nil)))
+    val lst))
 
 (mac cond (value . cases)
   "Evaluate VALUE and check IT against each CASE"
   (let ((rvrsd . (rev cases))
         (newif . (\ (acc e) `(if ,(car e) ,(cdr e) ,acc)))
         (nestd . (foldl newif nil rvrsd)))
-    `(let ((it. ,value)) ,nestd)
+    `(let ((it . ,value)) ,nestd)
   ))
 
 (mac match (value . cases)
@@ -22,4 +24,4 @@
 
 (mac unless (cond stmt)
   "Execute STMT if COND is NIL"
-  (if (not cond) stmt))
+  `(if (not ,cond) ,stmt))
