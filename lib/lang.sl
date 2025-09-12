@@ -1,6 +1,6 @@
 (use '(iterators foldl rev))
 
-(mac |> (val . lst)
+(def |> (val . lst)
   "Evaluate the first element of LST with VAL and pass down the result."
   (foldl (\ (acc elt) (elt acc)) val lst))
 
@@ -9,7 +9,7 @@
   (let ((rvrsd . (rev cases))
         (newif . (\ (acc e) `(if ,(car e) ,(cdr e) ,acc)))
         (nestd . (foldl newif nil rvrsd)))
-    `(let ((it. ,value)) ,nestd)
+    `(let ((it . ,value)) ,nestd)
   ))
 
 (mac match (value . cases)
@@ -22,4 +22,4 @@
 
 (mac unless (cond stmt)
   "Execute STMT if COND is NIL"
-  (if (not cond) stmt))
+  `(if (not ,cond) ,stmt))

@@ -417,7 +417,7 @@ mod compiler {
     #[test]
     fn quote_with_double_unquote() -> Result<(), Error> {
         let res = parse("(car `(1 ,(,V) 3))");
-        assert!(matches!(res, Err(Error::UnquoteOutsideBackquote)));
+        assert!(matches!(res, Err(Error::UnquoteOutsideBackquote(_))));
         Ok(())
     }
 

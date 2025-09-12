@@ -7,11 +7,11 @@ use std::{
 use bincode::{Decode, Encode};
 
 use crate::{
-    atom::Atom,
+    atom::{Atom, Span},
     error::Error,
     grammar::ListsParser,
     ir::{
-        Arguments, Backquote, ConstantDefinition, ExternalDefinition, FunctionDefinition, Location,
+        Arguments, Backquote, CallSite, ConstantDefinition, ExternalDefinition, FunctionDefinition,
         Operator, Quote, Statement, Statements, TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
@@ -398,7 +398,7 @@ impl Compiler {
             // Grab the quote.
             //
             let Statement::Quote(_, quote) = v else {
-                return Err(Error::ExpectedQuote);
+                return Err(Error::ExpectedQuote(Span::None));
             };
             //
             // Process the quote.
@@ -411,7 +411,7 @@ impl Compiler {
                     // Get the name of the module.
                     //
                     let Quote::Symbol(name) = car.as_ref() else {
-                        return Err(Error::ExpectedSymbol);
+                        return Err(Error::ExpectedSymbol(Span::None));
                     };
                     //
                     // Collect the names of the items.
@@ -420,13 +420,13 @@ impl Compiler {
                         .iter()
                         .map(|v| match v {
                             Quote::Symbol(v) => Ok(v.as_ref()),
-                            _ => Err(Error::ExpectedSymbol),
+                            _ => Err(Error::ExpectedSymbol(Span::None)),
                         })
                         .collect::<Result<_, _>>()?;
                     self.load_module(name, Some(&items))
                 }
                 Quote::Symbol(v) => self.load_module(v, None),
-                _ => Err(Error::ExpectedPairOrSymbol),
+                _ => Err(Error::ExpectedPairOrSymbol(Span::None)),
             }
         })
     }
@@ -656,7 +656,7 @@ impl Compiler {
         stmt: &Statement,
     ) -> Result<(), Error> {
         match stmt {
-            Statement::Apply(_, op, args, Location::Any) => {
+            Statement::Apply(_, op, args, CallSite::Any) => {
                 //
                 // Compile the arguments.
                 //
@@ -681,12 +681,12 @@ impl Compiler {
                 //
                 Ok(())
             }
-            Statement::Apply(_, op, args, Location::Tail) => {
+            Statement::Apply(_, op, args, CallSite::Tail) => {
                 //
                 // Get the symbol of the tail call.
                 //
                 let Statement::Symbol(_, symbol) = op.as_ref() else {
-                    return Err(Error::ExpectedSymbol);
+                    return Err(Error::ExpectedSymbol(Span::None));
                 };
                 //
                 // Compile the arguments.

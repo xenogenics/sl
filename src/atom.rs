@@ -1,33 +1,97 @@
-use std::rc::Rc;
+use std::{ops::Add, rc::Rc};
 
 use crate::{error::Error, heap, opcodes, stack};
+
+//
+// Location.
+//
+
+#[derive(Clone, Copy)]
+pub enum Span {
+    None,
+    Offset(usize, usize),
+}
+
+impl Add for Span {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (Span::None, Span::None)
+            | (Span::None, Span::Offset(_, _))
+            | (Span::Offset(_, _), Span::None) => Span::None,
+            (Span::Offset(a, _), Span::Offset(_, b)) => Span::Offset(a, b),
+        }
+    }
+}
+
+impl std::fmt::Debug for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Span::None => Ok(()),
+            Span::Offset(a, b) => write!(f, "[{a}..{b}]"),
+        }
+    }
+}
 
 //
 // Atom.
 //
 
 pub enum Atom {
-    Nil,
-    True,
-    Char(u8),
-    Number(i64),
-    Pair(Rc<Atom>, Rc<Atom>),
-    String(Box<str>),
-    Symbol(Box<str>),
-    Wildcard,
+    Nil(Span),
+    True(Span),
+    Char(Span, u8),
+    Number(Span, i64),
+    Pair(Span, Rc<Atom>, Rc<Atom>),
+    String(Span, Box<str>),
+    Symbol(Span, Box<str>),
+    Wildcard(Span),
+}
+
+//
+// Location.
+//
+
+impl Atom {
+    pub fn span(&self) -> Span {
+        match self {
+            Atom::Nil(loc)
+            | Atom::True(loc)
+            | Atom::Char(loc, _)
+            | Atom::Number(loc, _)
+            | Atom::Pair(loc, ..)
+            | Atom::String(loc, _)
+            | Atom::Symbol(loc, _)
+            | Atom::Wildcard(loc) => *loc,
+        }
+    }
+
+    pub fn with_span(&self, loc: Span) -> Rc<Self> {
+        match self {
+            Atom::Nil(_) => Atom::Nil(loc).into(),
+            Atom::True(_) => Atom::True(loc).into(),
+            Atom::Char(_, v) => Atom::Char(loc, *v).into(),
+            Atom::Number(_, v) => Atom::Number(loc, *v).into(),
+            Atom::Pair(_, car, cdr) => Atom::Pair(loc, car.clone(), cdr.clone()).into(),
+            Atom::String(_, v) => Atom::String(loc, v.clone()).into(),
+            Atom::Symbol(_, v) => Atom::Symbol(loc, v.clone()).into(),
+            Atom::Wildcard(_) => Atom::Wildcard(loc).into(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Atom {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Atom::Nil => write!(f, "nil"),
-            Atom::True => write!(f, "t"),
-            Atom::Char(v) => write!(f, "char({v})"),
-            Atom::Number(v) => write!(f, "number({v})"),
-            Atom::Pair(a, b) => write!(f, "({a:?} {b:?})"),
-            Atom::String(v) => write!(f, "string({v})"),
-            Atom::Symbol(v) => write!(f, "symbol({v})"),
-            Atom::Wildcard => write!(f, "_"),
+            Atom::Nil(loc) => write!(f, "{loc:?}nil"),
+            Atom::True(loc) => write!(f, "{loc:?}t"),
+            Atom::Char(loc, v) => write!(f, "{loc:?}char({v})"),
+            Atom::Number(loc, v) => write!(f, "{loc:?}number({v})"),
+            Atom::Pair(loc, a, b) => write!(f, "{loc:?}({a:?} {b:?})"),
+            Atom::String(loc, v) => write!(f, "{loc:?}string({v})"),
+            Atom::Symbol(loc, v) => write!(f, "{loc:?}symbol({v})"),
+            Atom::Wildcard(loc) => write!(f, "{loc:?}_"),
         }
     }
 }
@@ -38,15 +102,15 @@ impl std::fmt::Debug for Atom {
 
 impl Atom {
     pub fn char(v: u8) -> Rc<Self> {
-        Self::Char(v).into()
+        Self::Char(Span::None, v).into()
     }
 
     pub fn nil() -> Rc<Atom> {
-        Self::Nil.into()
+        Self::Nil(Span::None).into()
     }
 
     pub fn number(v: i64) -> Rc<Atom> {
-        Self::Number(v).into()
+        Self::Number(Span::None, v).into()
     }
 
     pub fn string(v: &str) -> Rc<Atom> {
@@ -79,19 +143,19 @@ impl Atom {
         /*
          * Done.
          */
-        Self::String(result.into_boxed_str()).into()
+        Self::String(Span::None, result.into_boxed_str()).into()
     }
 
     pub fn symbol(v: &str) -> Rc<Atom> {
-        Self::Symbol(v.into()).into()
+        Self::Symbol(Span::None, v.into()).into()
     }
 
     pub fn t() -> Rc<Atom> {
-        Self::True.into()
+        Self::True(Span::None).into()
     }
 
     pub fn wildcard() -> Rc<Atom> {
-        Self::Wildcard.into()
+        Self::Wildcard(Span::None).into()
     }
 }
 
@@ -101,7 +165,7 @@ impl Atom {
 
 impl Atom {
     pub const fn is_nil(&self) -> bool {
-        matches!(self, Atom::Nil)
+        matches!(self, Atom::Nil(_))
     }
 
     pub const fn is_pair(&self) -> bool {
@@ -116,13 +180,18 @@ impl Atom {
 impl Atom {
     pub fn conc(a: Rc<Atom>, b: Rc<Atom>) -> Rc<Atom> {
         match a.as_ref() {
-            Atom::Pair(car, cdr) => Atom::cons(car.clone(), Atom::conc(cdr.clone(), b)),
+            Atom::Pair(_, car, cdr) => {
+                let inloc = cdr.span() + b.span();
+                let outloc = car.span() + b.span();
+                let inner = Atom::conc(cdr.clone(), b).with_span(inloc);
+                Atom::cons(car.clone(), inner).with_span(outloc)
+            }
             _ => b,
         }
     }
 
     pub fn cons(a: Rc<Atom>, b: Rc<Atom>) -> Rc<Atom> {
-        Self::Pair(a, b).into()
+        Self::Pair(Span::None, a, b).into()
     }
 
     pub fn iter(self: &Rc<Atom>) -> impl std::iter::Iterator<Item = Rc<Atom>> {
@@ -142,8 +211,8 @@ impl Atom {
 impl Atom {
     fn fmt_pair(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Atom::Nil => Ok(()),
-            Atom::Pair(car, cdr) => {
+            Atom::Nil(_) => Ok(()),
+            Atom::Pair(_, car, cdr) => {
                 if cdr.is_nil() {
                     write!(f, "{car}")
                 } else {
@@ -159,18 +228,18 @@ impl Atom {
 impl std::fmt::Display for Atom {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Atom::Nil => write!(f, "nil"),
-            Atom::True => write!(f, "t"),
-            Atom::Char(c) => write!(f, "^{}", *c as char),
-            Atom::Number(n) => write!(f, "{n}"),
+            Atom::Nil(_) => write!(f, "nil"),
+            Atom::True(_) => write!(f, "t"),
+            Atom::Char(_, c) => write!(f, "^{}", *c as char),
+            Atom::Number(_, n) => write!(f, "{n}"),
             Atom::Pair(..) => {
                 write!(f, "(")?;
                 self.fmt_pair(f)?;
                 write!(f, ")")
             }
-            Atom::String(v) => write!(f, "\"{v}\""),
-            Atom::Symbol(v) => write!(f, "{v}"),
-            Atom::Wildcard => write!(f, "_"),
+            Atom::String(_, v) => write!(f, "\"{v}\""),
+            Atom::Symbol(_, v) => write!(f, "{v}"),
+            Atom::Wildcard(_) => write!(f, "_"),
         }
     }
 }
@@ -186,7 +255,7 @@ impl std::iter::Iterator for AtomIterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.0.as_ref() {
-            Atom::Pair(car, cdr) => {
+            Atom::Pair(_, car, cdr) => {
                 let value = car.clone();
                 self.0 = cdr.clone();
                 Some(value)
@@ -206,16 +275,16 @@ impl TryFrom<opcodes::Immediate> for Rc<Atom> {
 
     fn try_from(value: opcodes::Immediate) -> Result<Self, Self::Error> {
         match value {
-            opcodes::Immediate::Nil => Ok(Atom::Nil.into()),
-            opcodes::Immediate::True => Ok(Atom::True.into()),
-            opcodes::Immediate::Char(v) => Ok(Atom::Char(v).into()),
-            opcodes::Immediate::Number(v) => Ok(Atom::Number(v).into()),
+            opcodes::Immediate::Nil => Ok(Atom::Nil(Span::None).into()),
+            opcodes::Immediate::True => Ok(Atom::True(Span::None).into()),
+            opcodes::Immediate::Char(v) => Ok(Atom::Char(Span::None, v).into()),
+            opcodes::Immediate::Number(v) => Ok(Atom::Number(Span::None, v).into()),
             opcodes::Immediate::Symbol(v) => {
                 let index = v.iter().position(|v| *v == 0).unwrap_or(v.len());
                 let value = String::from_utf8_lossy(&v[0..index]).to_string();
-                Ok(Atom::Symbol(value.into_boxed_str()).into())
+                Ok(Atom::Symbol(Span::None, value.into_boxed_str()).into())
             }
-            opcodes::Immediate::Wildcard => Ok(Atom::Wildcard.into()),
+            opcodes::Immediate::Wildcard => Ok(Atom::Wildcard(Span::None).into()),
             _ => todo!(),
         }
     }
@@ -234,7 +303,7 @@ impl TryFrom<heap::Value> for Rc<Atom> {
             heap::Value::Pair(car, cdr) => {
                 let car = car.as_ref().clone().try_into()?;
                 let cdr = cdr.as_ref().clone().try_into()?;
-                Ok(Atom::Pair(car, cdr).into())
+                Ok(Atom::Pair(Span::None, car, cdr).into())
             }
             heap::Value::Bytes(v) => {
                 let value = v
@@ -247,7 +316,7 @@ impl TryFrom<heap::Value> for Rc<Atom> {
                 let value = v.as_c_str().to_str().map_err(|_| Error::InvalidString)?;
                 Ok(Atom::string(value))
             }
-            _ => Err(Error::ExpectedPairOrImmediate),
+            _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
         }
     }
 }
@@ -263,7 +332,7 @@ impl TryFrom<stack::Value> for Rc<Atom> {
         match value {
             stack::Value::Heap(v) => v.as_ref().clone().try_into(),
             stack::Value::Immediate(v) => v.try_into(),
-            _ => Err(Error::ExpectedPairOrImmediate),
+            _ => Err(Error::ExpectedPairOrImmediate(Span::None)),
         }
     }
 }
