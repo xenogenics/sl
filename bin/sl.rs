@@ -57,7 +57,7 @@ fn main() -> Result<(), Error> {
     //
     // Generate the bytecode.
     //
-    let artifacts = compiler.compile()?;
+    let artifacts = compiler.compile("main")?;
     //
     // Build the virtual machine.
     //

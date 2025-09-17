@@ -53,7 +53,7 @@ fn main() -> Result<(), Error> {
     //
     // Generate the bytecode.
     //
-    let artifacts = compiler.compile()?;
+    let artifacts = compiler.compile("main")?;
     //
     // Write the serialize output.
     //

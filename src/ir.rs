@@ -800,7 +800,7 @@ impl Statement {
                         Ok(Self::Apply(atom, stmt, stmts, CallSite::Any))
                     }
                     Err(_) if macros.contains(v) => {
-                        let stmts = Statements::from_atom(rem.clone(), macros)?;
+                        let stmts = Statements::from_atom_quoted(rem.clone(), macros)?;
                         Ok(Self::Expand(atom.clone(), name.clone(), stmts))
                     }
                     Err(_) => {
@@ -958,6 +958,17 @@ impl Statements {
             .collect::<Result<_, Error>>()?;
         Ok(Self(inner))
     }
+
+    fn from_atom_quoted(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+        let inner = value
+            .into_iter()
+            .map(|v| {
+                let atom = Atom::cons(Atom::symbol("quote"), v);
+                Statement::from_atom(atom, macros)
+            })
+            .collect::<Result<_, Error>>()?;
+        Ok(Self(inner))
+    }
 }
 
 //
@@ -974,6 +985,26 @@ pub enum TopLevelStatement {
 }
 
 impl TopLevelStatement {
+    pub fn atom(&self) -> Rc<Atom> {
+        match self {
+            Self::Constant(atom, _)
+            | Self::External(atom, _)
+            | Self::Function(atom, _)
+            | Self::Macro(atom, _)
+            | Self::Use(atom, _) => atom.clone(),
+        }
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::Constant(_, v) => Some(v.name().as_ref()),
+            Self::External(_, v) => Some(v.name().as_ref()),
+            Self::Function(_, v) => Some(v.name().as_ref()),
+            Self::Macro(_, v) => Some(v.name().as_ref()),
+            Self::Use(..) => None,
+        }
+    }
+
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         match self {
             TopLevelStatement::Function(_, def) | TopLevelStatement::Macro(_, def) => def.closure(),

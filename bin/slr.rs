@@ -100,7 +100,7 @@ impl CompilerTrait for NullCompiler {
         Ok(())
     }
 
-    fn compile(self) -> Result<Artifacts, sl::error::Error> {
+    fn compile(self, _: &str) -> Result<Artifacts, sl::error::Error> {
         Ok(Artifacts::default())
     }
 }
@@ -194,7 +194,7 @@ fn inspect(compiler: Compiler, name: &str) -> Result<(), sl::error::Error> {
     //
     // Generate the bytecode.
     //
-    let artifacts = compiler.compile()?;
+    let artifacts = compiler.compile(name)?;
     //
     // Get the entrypoint.
     //
@@ -259,7 +259,7 @@ fn eval(
     //
     // Generate the bytecode.
     //
-    let artifacts = compiler.compile()?;
+    let artifacts = compiler.compile("__repl__")?;
     //
     // Build the virtual machine.
     //

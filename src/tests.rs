@@ -26,7 +26,7 @@ impl CompilerTrait for NullCompiler {
         Ok(())
     }
 
-    fn compile(self) -> Result<Artifacts, Error> {
+    fn compile(self, _: &str) -> Result<Artifacts, Error> {
         Ok(Default::default())
     }
 }
@@ -155,7 +155,7 @@ mod compiler {
         let _ = parser
             .parse(&mut compiler, stmt)
             .map_err(|e| Error::Parse(e.to_string()))?;
-        compiler.compile()
+        compiler.compile("main")
     }
 
     fn compile_with_operators(stmt: &str) -> Result<Artifacts, Error> {
@@ -165,7 +165,7 @@ mod compiler {
         let _ = parser
             .parse(&mut compiler, stmt)
             .map_err(|e| Error::Parse(e.to_string()))?;
-        compiler.compile()
+        compiler.compile("main")
     }
 
     #[test]

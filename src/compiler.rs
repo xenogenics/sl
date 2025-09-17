@@ -137,7 +137,7 @@ pub trait CompilerTrait: Clone {
     fn eval(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
     fn expand(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
-    fn compile(self) -> Result<Artifacts, Error>;
+    fn compile(self, entrypoint: &str) -> Result<Artifacts, Error>;
 }
 
 //
@@ -191,7 +191,7 @@ impl CompilerTrait for Compiler {
         //
         // Convert the entrypoint into a statement.
         //
-        let topl = TopLevelStatement::from_atom(entrypoint, &self.macros)?;
+        let topl = TopLevelStatement::from_atom(entrypoint, &mut self.macros)?;
         //
         // Load the top-level statement.
         //
@@ -199,7 +199,7 @@ impl CompilerTrait for Compiler {
         //
         // Generate the bytecode.
         //
-        let artifacts = self.compile()?;
+        let artifacts = self.compile(&symbol)?;
         //
         // Build the virtual machine.
         //
@@ -252,15 +252,15 @@ impl CompilerTrait for Compiler {
     }
 
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
-        let stmt = TopLevelStatement::from_atom(atom, &self.macros)?;
+        let stmt = TopLevelStatement::from_atom(atom, &mut self.macros)?;
         self.load_statement(stmt)
     }
 
-    fn compile(self) -> Result<Artifacts, Error> {
+    fn compile(self, entrypoint: &str) -> Result<Artifacts, Error> {
         //
         // Collect the live defuns.
         //
-        let liveset = self.collect_liveset()?;
+        let liveset = self.collect_liveset(entrypoint)?;
         //
         // Serialize the live external functions.
         //
@@ -329,7 +329,8 @@ impl CompilerTrait for Compiler {
                     let (addr, argcnt) = defuns
                         .iter()
                         .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
-                        .ok_or(Error::InvalidSymbol(sym))?;
+                        .ok_or(Error::InvalidSymbol(sym))
+                        .unwrap();
                     //
                     // Push the funcall.
                     //
@@ -396,12 +397,12 @@ impl Compiler {
         })
     }
 
-    fn collect_liveset(&self) -> Result<Option<HashSet<String>>, Error> {
+    fn collect_liveset(&self, entrypoint: &str) -> Result<Option<HashSet<String>>, Error> {
         let mut result = HashSet::new();
         //
         // Grab the main block.
         //
-        let Some((name, ctxt)) = self.blocks.iter().find(|(k, _)| k.as_ref() == "main") else {
+        let Some((name, ctxt)) = self.blocks.iter().find(|(k, _)| k.as_ref() == entrypoint) else {
             return Ok(None);
         };
         //
@@ -424,8 +425,13 @@ impl Compiler {
         match stmt {
             TopLevelStatement::Constant(_, v) => self.compile_constant(v),
             TopLevelStatement::External(_, v) => self.compile_external(v),
-            TopLevelStatement::Function(_, v) => self.compile_function(v, false),
-            TopLevelStatement::Macro(_, v) => self.compile_function(v, true),
+            TopLevelStatement::Function(_, v) => self.compile_function(v),
+            TopLevelStatement::Macro(_, v) => {
+                let name = v.name().clone();
+                let result = self.compile_function(v)?;
+                self.macros.insert(name);
+                Ok(result)
+            }
             TopLevelStatement::Use(_, v) => self.load_modules(v),
         }
     }
@@ -450,8 +456,6 @@ impl Compiler {
             match quote {
                 Quote::Pair(car, cdr) => {
                     //
-                    // Split the quote
-                    //
                     // Get the name of the module.
                     //
                     let Quote::Symbol(name) = car.as_ref() else {
@@ -475,7 +479,7 @@ impl Compiler {
         })
     }
 
-    fn load_module(&mut self, name: &str, _items: Option<&[&str]>) -> Result<(), Error> {
+    fn load_module(&mut self, name: &str, items: Option<&[&str]>) -> Result<(), Error> {
         //
         // Compute the source path.
         //
@@ -500,29 +504,31 @@ impl Compiler {
             .parse(&mut compiler, &source)
             .map_err(|v| Error::Parse(v.to_string()))?;
         //
-        // Rewrite the atoms using our intermediate representation.
+        // Process the atoms internally.
         //
-        let mut stmts: Vec<_> = atoms
-            .into_iter()
-            .map(|v| TopLevelStatement::from_atom(v, &self.macros))
-            .collect::<Result<_, _>>()?;
-        //
-        // Filter function declarations.
-        //
-        if let Some(items) = _items {
-            stmts.retain(|v| match v {
-                TopLevelStatement::Constant(_, v) => items.contains(&v.name().as_ref()),
-                TopLevelStatement::External(_, v) => items.contains(&v.name().as_ref()),
-                TopLevelStatement::Function(_, v) | TopLevelStatement::Macro(_, v) => {
-                    items.contains(&v.name().as_ref())
-                }
-                TopLevelStatement::Use(..) => true,
-            });
+        for atom in atoms {
+            //
+            // Convert the atom.
+            //
+            let stmt = TopLevelStatement::from_atom(atom, &mut self.macros)?;
+            //
+            // Check the capture list.
+            //
+            if let Some(capture) = items
+                && let Some(name) = stmt.name()
+                && !capture.contains(&name)
+            {
+                continue;
+            }
+            //
+            // Process the statement.
+            //
+            self.load_statement(stmt)?;
         }
         //
-        // Process the statements.
+        // Done.
         //
-        stmts.into_iter().try_for_each(|v| self.load_statement(v))
+        Ok(())
     }
 }
 
@@ -557,7 +563,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_function(&mut self, defun: FunctionDefinition, is_macro: bool) -> Result<(), Error> {
+    fn compile_function(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
         let mut ctxt = Context::new(arity);
@@ -600,12 +606,6 @@ impl Compiler {
         // Save the block.
         //
         self.blocks.push((defun.name().clone(), ctxt));
-        //
-        // Optionally mark the function as a macro.
-        //
-        if is_macro {
-            self.macros.insert(defun.name().clone());
-        }
         //
         // Done.
         //
@@ -860,15 +860,9 @@ impl Compiler {
                 let mut comp = self.clone();
                 comp.macros.remove(name);
                 //
-                // Quote the arguments.
-                //
-                let args = args.iter().rev().fold(Atom::nil(), |acc, v| {
-                    Atom::cons(Atom::cons(Atom::symbol("quote"), v.atom()), acc)
-                });
-                //
                 // Evaluate the macro.
                 //
-                let expr = Atom::cons(Atom::symbol(name), args);
+                let expr = Atom::cons(Atom::symbol(name), args.atom());
                 let expn = comp.eval(expr, 1024, false)?;
                 //
                 // Check if the result is valid.
@@ -1052,7 +1046,6 @@ impl Compiler {
                 // Compile the condition.
                 //
                 self.compile_statement(ctxt, cond)?;
-                ctxt.stackn -= 1;
                 //
                 // Generate the branch to the else block.
                 //
@@ -1060,6 +1053,10 @@ impl Compiler {
                 let start = ctxt.stream.len();
                 let label = LabelOrOpCode::BranchIfNot(name.clone());
                 ctxt.stream.push_back(label);
+                //
+                // Update the stack (the branch consumes the result).
+                //
+                ctxt.stackn -= 1;
                 //
                 // Compile THEN.
                 //
@@ -1121,6 +1118,7 @@ impl Compiler {
                 if argcnt > 0 {
                     ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
                     ctxt.stream.push_back(OpCode::Pop(argcnt).into());
+                    ctxt.stackn -= argcnt;
                 }
                 //
                 // Clear the bindings from the locals.

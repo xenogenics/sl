@@ -526,6 +526,11 @@ impl VirtualMachine {
                             self.stack.push(result);
                         }
                     }
+                    Value::Immediate(Immediate::Funcall(addr, Arity::None)) => {
+                        self.stack.push(Value::Link(pc + 1));
+                        pc = addr as usize;
+                        continue;
+                    }
                     Value::Immediate(Immediate::Funcall(addr, Arity::All)) => {
                         //
                         // Collect the arguments into a list.
