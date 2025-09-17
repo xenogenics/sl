@@ -16,6 +16,10 @@ name = "sld"
 path = "bin/sld.rs"
 
 [[bin]]
+name = "slr"
+path = "bin/slr.rs"
+
+[[bin]]
 name = "slvm"
 path = "bin/slvm.rs"
 
@@ -33,6 +37,7 @@ env_logger = "0.11"
 lalrpop-util = { version = "0.20", features = ["lexer"] }
 libc = "0.2"
 libffi = "4.1"
+rustyline = { version = "17.0", features = ["derive"] }
 strum = "0.26"
 strum_macros = "0.26"
 thiserror = "2.0"

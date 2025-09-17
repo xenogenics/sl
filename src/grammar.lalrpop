@@ -38,59 +38,53 @@ pub Lists: Vec<Rc<Atom>> = {
 	}
 }
 
-List: Rc<Atom> = {
-	<start:@L> "(" ")" <end:@R> => {
-		Atom::nil().with_span(Span::Offset(start, end))
+pub Expression: Rc<Atom> = {
+	<start:@L> "~" <e:Atom> <end:@R> =>? {
+		let comp = compiler.clone();
+		let rslt = comp.eval(e, 1024, false).map_err(|error| ParseError::User { error })?;
+		Ok(rslt.with_span(Span::Offset(start, end)))
 	},
-	<start:@L> "(" <v:Terms> ")" <end:@R> => {
-		v.with_span(Span::Offset(start, end))
+	<start:@L> "'"  <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("quote"), e).with_span(Span::Offset(start, end))
 	},
-	<start:@L> "(" <v:Terms> "." <w:UnquotedTerm> ")" <end:@R> => {
-		Atom::conc(v, w).with_span(Span::Offset(start, end))
+	<start:@L> "`" <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("backquote"), e).with_span(Span::Offset(start, end))
+	},
+	<start:@L> "," <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("unquote"), e).with_span(Span::Offset(start, end))
+	},
+	<start:@L> ",@" <e:Atom> <end:@R> => {
+		Atom::cons(Atom::symbol("unquote-splice"), e).with_span(Span::Offset(start, end))
+	},
+	<start:@L> <e:Atom> <end:@R> => {
+		e.with_span(Span::Offset(start, end))
 	},
 }
 
-Terms: Rc<Atom> = {
-	"~" <e:Term> =>? {
-		let comp = compiler.clone();
-		comp.eval(e).map_err(|error| ParseError::User { error })
-	},
-	"~" <e:Term> <v:Terms> =>? {
-		let comp = compiler.clone();
-		let expr = compiler.clone().eval(e).map_err(|error| ParseError::User { error })?;
-		Ok(Atom::conc(expr, v))
-	},
-	<start:@L> <e:UnquotedTerm> <end:@R> => {
+Expressions: Rc<Atom> = {
+	<start:@L> <e:Expression> <end:@R> => {
 		Atom::cons(e, Atom::nil()).with_span(Span::Offset(start, end))
 	},
-	<start:@L> <e:UnquotedTerm> <v:Terms> <end:@R> => {
+	<start:@L> <e:Expression> <v:Expressions> <end:@R> => {
 		Atom::cons(e, v).with_span(Span::Offset(start, end))
 	},
 }
 
-UnquotedTerm: Rc<Atom> = {
-	<start:@L> ","  <e:Term> <end:@R> => {
-		Atom::cons(Atom::symbol("unquote"), e).with_span(Span::Offset(start, end))
-	},
-	<start:@L> ",@" <e:Term> <end:@R> => {
-		Atom::cons(Atom::symbol("unquote-splice"), e).with_span(Span::Offset(start, end))
-	},
-	<e:Term> => e,
-}
-
-Term: Rc<Atom> = {
-	<start:@L> "`" <e:Atom> <end:@R> => {
-		Atom::cons(Atom::symbol("backquote"), e).with_span(Span::Offset(start, end))
-	},
-	<start:@L> "'" <e:Atom> <end:@R> => {
-		Atom::cons(Atom::symbol("quote"), e).with_span(Span::Offset(start, end))
-	},
-	<e:Atom> => e,
-}
-
 Atom: Rc<Atom> = {
-	<e:List>                         => e,
+	<e:List> => e,
 	<start:@R> <e:Terminal> <end:@R> => e.with_span(Span::Offset(start, end)),
+}
+
+List: Rc<Atom> = {
+	<start:@L> "(" ")" <end:@R> => {
+		Atom::nil().with_span(Span::Offset(start, end))
+	},
+	<start:@L> "(" <v:Expressions> ")" <end:@R> => {
+		v.with_span(Span::Offset(start, end))
+	},
+	<start:@L> "(" <v:Expressions> "." <w:Expression> ")" <end:@R> => {
+		Atom::conc(v, w).with_span(Span::Offset(start, end))
+	},
 }
 
 Terminal: Rc<Atom> = {

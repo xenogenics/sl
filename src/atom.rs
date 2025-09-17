@@ -229,7 +229,7 @@ impl std::fmt::Display for Atom {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Atom::Nil(_) => write!(f, "nil"),
-            Atom::True(_) => write!(f, "t"),
+            Atom::True(_) => write!(f, "T"),
             Atom::Char(_, c) => write!(f, "^{}", *c as char),
             Atom::Number(_, n) => write!(f, "{n}"),
             Atom::Pair(..) => {
@@ -291,7 +291,7 @@ impl TryFrom<opcodes::Immediate> for Rc<Atom> {
 }
 
 //
-// TryFrom<stack::Value>.
+// TryFrom<heap::Value>.
 //
 
 impl TryFrom<heap::Value> for Rc<Atom> {

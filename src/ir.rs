@@ -376,6 +376,10 @@ impl Backquote {
         BackquoteIterator(self)
     }
 
+    pub fn is_nil(&self) -> bool {
+        matches!(self, Self::Value(Value::Nil))
+    }
+
     pub fn is_splice(&self) -> bool {
         matches!(self, Self::UnquoteSplice(_))
     }

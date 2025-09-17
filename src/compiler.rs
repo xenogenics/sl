@@ -134,7 +134,8 @@ impl Artifacts {
 //
 
 pub trait CompilerTrait: Clone {
-    fn eval(self, atom: Rc<Atom>) -> Result<Rc<Atom>, Error>;
+    fn eval(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
+    fn expand(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
     fn compile(self) -> Result<Artifacts, Error>;
 }
@@ -152,6 +153,7 @@ pub struct Compiler {
     exfuns: HashMap<Box<str>, ExternalDefinition>,
     labels: HashMap<Box<str>, usize>,
     lcount: usize,
+    ecount: usize,
 }
 
 impl Compiler {
@@ -167,14 +169,19 @@ impl Compiler {
 //
 
 impl CompilerTrait for Compiler {
-    fn eval(mut self, expr: Rc<Atom>) -> Result<Rc<Atom>, Error> {
+    fn eval(mut self, expr: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error> {
+        //
+        // Define the symbol.
+        //
+        let symbol = format!("__eval__{:04}", self.ecount);
+        self.ecount += 1;
         //
         // Wrap the statement into a top-level function.
         //
         let entrypoint = Atom::cons(
             Atom::symbol("def"),
             Atom::cons(
-                Atom::symbol("__eval__"),
+                Atom::symbol(&symbol),
                 Atom::cons(
                     Atom::nil(),
                     Atom::cons(Atom::nil(), Atom::cons(expr, Atom::nil())),
@@ -196,7 +203,7 @@ impl CompilerTrait for Compiler {
         //
         // Build the virtual machine.
         //
-        let mut vm = VirtualMachine::new("__eval__", 1024, false);
+        let mut vm = VirtualMachine::new(&symbol, stack_size, trace);
         //
         // Run.
         //
@@ -205,6 +212,43 @@ impl CompilerTrait for Compiler {
         // Convert the result into an atom.
         //
         result.try_into()
+    }
+
+    fn expand(mut self, expr: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error> {
+        //
+        // Split the atom.
+        //
+        let Atom::Pair(_, symbol, args) = expr.as_ref() else {
+            return Err(Error::ExpectedPair(expr.span()));
+        };
+        //
+        // Make sure the symbol is a symbol.
+        //
+        let Atom::Symbol(_, name) = symbol.as_ref() else {
+            return Err(Error::ExpectedSymbol(symbol.span()));
+        };
+        //
+        // Make sure the symbol is a macro.
+        //
+        if !self.macros.contains(name) {
+            return Err(Error::ExpectedMacro(symbol.span()));
+        }
+        //
+        // Unmark the macro symbol.
+        //
+        self.macros.remove(name);
+        //
+        // Quote the arguments.
+        //
+        let args: Vec<_> = args.iter().collect();
+        let args = args.into_iter().rev().fold(Atom::nil(), |acc, v| {
+            Atom::cons(Atom::cons(Atom::symbol("quote"), v), acc)
+        });
+        //
+        // Evaluate the macro.
+        //
+        let expr = Atom::cons(Atom::symbol(name), args);
+        self.eval(expr, stack_size, trace)
     }
 
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
@@ -518,13 +562,6 @@ impl Compiler {
         let argcnt = defun.arguments().len();
         let mut ctxt = Context::new(arity);
         //
-        // Make sure the function does not exist.
-        //
-        if self.defuns.contains_key(defun.name()) {
-            let name = defun.name().to_string().into_boxed_str();
-            return Err(Error::FunctionAlreadyDefined(name));
-        }
-        //
         // Track the function arguments.
         //
         ctxt.track_arguments(defun.arguments());
@@ -832,7 +869,7 @@ impl Compiler {
                 // Evaluate the macro.
                 //
                 let expr = Atom::cons(Atom::symbol(name), args);
-                let expn = comp.eval(expr)?;
+                let expn = comp.eval(expr, 1024, false)?;
                 //
                 // Check if the result is valid.
                 //
@@ -1104,6 +1141,19 @@ impl Compiler {
 
     fn compile_backquote(&mut self, ctxt: &mut Context, quote: &Backquote) -> Result<(), Error> {
         match quote {
+            //
+            // Process pairs terminated with a splice.
+            //
+            // NOTE(xrg): expressions of the form `(e0 ,@e1) where e1 is a
+            // terminal atom need special handling as the spliced pair case
+            // below would try to execute (conc e1 nil), which returns nil.
+            //
+            Backquote::Pair(car, cdr) if car.is_splice() && cdr.is_nil() => {
+                self.compile_backquote(ctxt, car.as_ref())
+            }
+            //
+            // Process spliced pairs (conc).
+            //
             Backquote::Pair(car, cdr) if car.is_splice() => {
                 //
                 // Process car and cdr.
@@ -1127,6 +1177,9 @@ impl Compiler {
                 //
                 Ok(())
             }
+            //
+            // Process regular pairs (cons).
+            //
             Backquote::Pair(car, cdr) => {
                 //
                 // Process car and cdr.
@@ -1150,6 +1203,9 @@ impl Compiler {
                 //
                 Ok(())
             }
+            //
+            // Process symbols.
+            //
             Backquote::Symbol(v) => {
                 //
                 // Convert the symbol.
@@ -1170,9 +1226,15 @@ impl Compiler {
                 //
                 Ok(())
             }
+            //
+            // Process unquotes.
+            //
             Backquote::Unquote(stmt) | Backquote::UnquoteSplice(stmt) => {
                 self.compile_statement(ctxt, stmt)
             }
+            //
+            // Process values.
+            //
             Backquote::Value(value) => Self::compile_value(ctxt, value),
         }
     }

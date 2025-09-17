@@ -14,7 +14,11 @@ use crate::{
 struct NullCompiler;
 
 impl CompilerTrait for NullCompiler {
-    fn eval(self, _: Rc<Atom>) -> Result<Rc<Atom>, Error> {
+    fn eval(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, Error> {
+        Err(Error::NotSupported)
+    }
+
+    fn expand(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, Error> {
         Err(Error::NotSupported)
     }
 

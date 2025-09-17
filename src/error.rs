@@ -14,6 +14,8 @@ pub enum Error {
     ExpectedFunctionDefinition(Span),
     #[error("Expected lambda definition")]
     ExpectedLambdaDefinition(Span),
+    #[error("Expected macro")]
+    ExpectedMacro(Span),
     #[error("Expected module load")]
     ExpectedModuleLoad(Span),
     #[error("Expected pair")]
@@ -32,8 +34,6 @@ pub enum Error {
     ExpectedTopLevelStatement(Span),
     #[error("Expected value")]
     ExpectedValue(Span),
-    #[error("Function already defined: {0}")]
-    FunctionAlreadyDefined(Box<str>),
     #[error("Function definition can only happen at the top level")]
     FunctionDefinitionTopLevelOnly,
     #[error("Invalid foreign type: {0}")]
