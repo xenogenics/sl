@@ -65,8 +65,23 @@ impl VirtualMachine {
             // Print trace.
             //
             if self.trace {
-                println!("---- {:?}", self.stack);
-                println!("{pc:04} {:?}", ops[pc]);
+                //
+                // Print the current label.
+                //
+                if let Some((e, _, _)) = syms.iter().find(|(_, n, _)| *n == pc) {
+                    println!("{e}:");
+                }
+                //
+                // Format the stack content.
+                //
+                let mut stack = self.stack.to_string();
+                if stack.len() > 60 {
+                    stack = format!("..{}", &stack[stack.len() - 58..]);
+                }
+                //
+                // Print the current state.
+                //
+                println!("    {pc:04} {:<32} - {stack}", format!("{:?}", ops[pc]));
             }
             //
             // Execute the opcode.

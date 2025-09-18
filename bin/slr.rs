@@ -11,8 +11,6 @@ use sl::{
     atom::Atom,
     compiler::{Artifacts, Compiler, CompilerTrait},
     grammar::ExpressionParser,
-    heap,
-    opcodes::Immediate,
     stack,
     vm::VirtualMachine,
 };
@@ -22,8 +20,6 @@ use thiserror::Error;
 struct Arguments {
     #[arg(short, long, default_value_t = 128)]
     stack_size: usize,
-    #[arg(long)]
-    trace: bool,
 }
 
 //
@@ -54,6 +50,8 @@ enum Command {
     Expand(String),
     Inspect(String),
     Quit,
+    Trace,
+    Untrace,
 }
 
 impl FromStr for Command {
@@ -75,6 +73,8 @@ impl FromStr for Command {
             ".inspect" if parts.len() >= 2 => Ok(Self::Inspect(parts[1].to_string())),
             ".inpect" => Err(Error::MissingcommandParameter("symbol".into())),
             ".quit" => Ok(Self::Quit),
+            ".trace" => Ok(Self::Trace),
+            ".untrace" => Ok(Self::Untrace),
             _ => Err(Error::InvalidCommand(s.to_string())),
         }
     }
@@ -279,11 +279,16 @@ fn main() -> Result<(), Error> {
     // Parse the arguments.
     //
     let args = Arguments::parse();
+    let mut trace = false;
     //
     // Create the line editor.
     //
     let mut rl = Editor::new()?;
     rl.set_helper(Some(InputValidator));
+    //
+    // Load the history file.
+    //
+    rl.load_history("history.txt").unwrap_or_default();
     //
     // Create the parser.
     //
@@ -324,6 +329,14 @@ fn main() -> Result<(), Error> {
                             continue;
                         }
                         Command::Quit => break,
+                        Command::Trace => {
+                            trace = true;
+                            continue;
+                        }
+                        Command::Untrace => {
+                            trace = false;
+                            continue;
+                        }
                     }
                 }
                 //
@@ -339,7 +352,8 @@ fn main() -> Result<(), Error> {
                     Ok(()) => continue,
                     Err(err) => match err {
                         sl::error::Error::ExpectedTopLevelStatement(_)
-                        | sl::error::Error::ExpectedFunctionCall(_) => (),
+                        | sl::error::Error::ExpectedFunctionCall(_)
+                        | sl::error::Error::ExpectedSymbol(_) => (),
                         _ => {
                             println!("! {err}");
                             continue;
@@ -349,36 +363,8 @@ fn main() -> Result<(), Error> {
                 //
                 // Try to evaluate the statement.
                 //
-                match eval(compiler.clone(), atom, args.stack_size, args.trace) {
-                    Ok(value) => match value {
-                        stack::Value::Closure(_) => println!("#<closure>"),
-                        stack::Value::Heap(value) => match value.as_ref() {
-                            heap::Value::Closure(_) => println!("#<closure>"),
-                            heap::Value::Immediate(value) => match value {
-                                Immediate::Extcall(idx) => println!("#<extcall[{idx}]>"),
-                                Immediate::Funcall(idx, _) => println!("#<funcall[{idx}]>"),
-                                _ => {
-                                    let value: Rc<Atom> = value.clone().try_into().unwrap();
-                                    println!("{value}");
-                                }
-                            },
-                            heap::Value::Bytes(..)
-                            | heap::Value::Pair(..)
-                            | heap::Value::String(..) => {
-                                let value: Rc<Atom> = value.as_ref().clone().try_into().unwrap();
-                                println!("{value}");
-                            }
-                        },
-                        stack::Value::Immediate(value) => match value {
-                            Immediate::Extcall(idx) => println!("#<extcall[{idx}]>"),
-                            Immediate::Funcall(idx, _) => println!("#<funcall[{idx}]>"),
-                            _ => {
-                                let value: Rc<Atom> = value.try_into().unwrap();
-                                println!("{value}");
-                            }
-                        },
-                        stack::Value::Link(_) => todo!(),
-                    },
+                match eval(compiler.clone(), atom, args.stack_size, trace) {
+                    Ok(value) => println!("{value}"),
                     Err(error) => println!("! {error}"),
                 }
             }
@@ -396,6 +382,10 @@ fn main() -> Result<(), Error> {
             }
         }
     }
+    //
+    // Save the history file.
+    //
+    rl.save_history("history.txt").unwrap_or_default();
     //
     // Done.
     //

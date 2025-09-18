@@ -18,6 +18,14 @@ impl Closure {
     }
 }
 
+impl std::fmt::Display for Closure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let vals = self.vals.to_vec();
+        let vals: Vec<_> = vals.into_iter().map(|v| v.to_string()).collect();
+        write!(f, "K({}, {})", self.args, vals.join(","))
+    }
+}
+
 //
 // Value.
 //
@@ -56,6 +64,17 @@ impl Value {
         match self {
             Value::Heap(value) => value.as_raw_cstr(),
             _ => panic!("Expected a heap value"),
+        }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Closure(value) => write!(f, "#{value}"),
+            Value::Heap(value) => write!(f, "{value}"),
+            Value::Immediate(value) => write!(f, "{value}"),
+            Value::Link(_) => write!(f, "#L"),
         }
     }
 }
@@ -218,5 +237,12 @@ impl Stack {
 
     pub fn unlink(&mut self) -> Value {
         self.0.remove(self.0.len() - 2)
+    }
+}
+
+impl std::fmt::Display for Stack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let values: Vec<_> = self.0.iter().map(ToString::to_string).collect();
+        write!(f, "{}", values.join(","))
     }
 }

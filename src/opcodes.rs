@@ -14,6 +14,17 @@ pub enum Arity {
     None,
 }
 
+impl std::fmt::Display for Arity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Arity::All => write!(f, "*"),
+            Arity::Some(n) => write!(f, "{n}"),
+            Arity::SomeWithRem(n) => write!(f, "{n}+"),
+            Arity::None => write!(f, "0"),
+        }
+    }
+}
+
 //
 // Immediate values.
 //
@@ -50,6 +61,25 @@ impl Immediate {
         match self {
             Immediate::Number(v) => *v,
             _ => panic!("Expected a number"),
+        }
+    }
+}
+
+impl std::fmt::Display for Immediate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Immediate::Nil => write!(f, "nil"),
+            Immediate::True => write!(f, "T"),
+            Immediate::Char(c) => write!(f, "^{}", *c as char),
+            Immediate::Number(n) => write!(f, "{n}"),
+            Immediate::Extcall(v) => write!(f, "#X({v})",),
+            Immediate::Funcall(v, arity) => write!(f, "#F({v},{arity})"),
+            Immediate::Symbol(v) => {
+                let len = v.iter().position(|v| *v == 0).unwrap_or(v.len());
+                let sym = unsafe { std::str::from_utf8_unchecked(&v[..len]) };
+                write!(f, "{sym}")
+            }
+            Immediate::Wildcard => write!(f, "_"),
         }
     }
 }

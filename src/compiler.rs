@@ -147,7 +147,7 @@ pub trait CompilerTrait: Clone {
 #[derive(Clone, Default)]
 pub struct Compiler {
     consts: HashMap<Box<str>, Value>,
-    blocks: Vec<(Box<str>, Context)>,
+    blocks: HashMap<Box<str>, Context>,
     defuns: HashMap<Box<str>, Arity>,
     macros: HashSet<Box<str>>,
     exfuns: HashMap<Box<str>, ExternalDefinition>,
@@ -387,7 +387,7 @@ impl Compiler {
             //
             // Grab the block.
             //
-            let Some((_, ctxt)) = self.blocks.iter().find(|(k, _)| k == &v) else {
+            let Some(ctxt) = self.blocks.get(&v) else {
                 return Err(Error::UnresolvedSymbol(v));
             };
             //
@@ -605,7 +605,7 @@ impl Compiler {
         //
         // Save the block.
         //
-        self.blocks.push((defun.name().clone(), ctxt));
+        self.blocks.insert(defun.name().clone(), ctxt);
         //
         // Done.
         //
@@ -967,7 +967,7 @@ impl Compiler {
                 //
                 // Save the block.
                 //
-                self.blocks.push((name, next));
+                self.blocks.insert(name, next);
                 //
                 // Done.
                 //

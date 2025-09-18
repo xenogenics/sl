@@ -58,6 +58,40 @@ impl Value {
     pub fn cons(a: Rc<Value>, b: Rc<Value>) -> Rc<Value> {
         Self::Pair(a, b).into()
     }
+
+    fn fmt_pair(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Immediate(Immediate::Nil) => Ok(()),
+            Value::Pair(car, cdr) => {
+                if matches!(cdr.as_ref(), Value::Immediate(Immediate::Nil)) {
+                    write!(f, "{car}")
+                } else {
+                    write!(f, "{car} ")?;
+                    cdr.fmt_pair(f)
+                }
+            }
+            v => write!(f, ". {v}"),
+        }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Bytes(_) => write!(f, "#<bytes>"),
+            Value::Closure(_) => write!(f, "#<closure>"),
+            Value::Immediate(value) => write!(f, "{value}"),
+            Value::Pair(..) => {
+                write!(f, "(")?;
+                self.fmt_pair(f)?;
+                write!(f, ")")
+            }
+            Value::String(value) => {
+                let val = value.as_c_str().to_string_lossy();
+                write!(f, "\"{val}\"")
+            }
+        }
+    }
 }
 
 impl PartialEq for Value {
