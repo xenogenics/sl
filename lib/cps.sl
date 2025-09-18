@@ -1,9 +1,12 @@
 (use 'lang)
 
 ;
-; Continuation-passing style library.
+; Continuation-passing style translator.
 ; 
 ; Inspired by: https://okmij.org/ftp/Scheme/callcc-calc-page.html
+;
+; Returns a closure of the form: (\ (k) ...) where k is the next continuation.
+; To produce the result, the closure can be applied to the (id) function.
 ; 
 
 (mac cps (expr)
@@ -83,9 +86,32 @@
     (_ . `(\ (k) (k ,it)))
   ))
 
+;
+; Closure capture.
+;
+; Meant to be used in conjunction with (catch/cc), it will cause (cps) to
+; return the current continuation in a CPS closure: (\ (k) ... cc ...).
+;
+; To make use of the captured continuation, it must be first unpacked using
+; for instance the (id) function: ((cps (... (catch/cc capture))) id).
+;
+; It then can be applied to any value expected by the continuation:
+;
+; (let ((cc . ((cps (... (catch/cc capture)) id))))
+;     (cc some-value))
+; 
+
 (def capture (k0)
    "Capture the current continuation K0 by returning it."
    (\ (k1)           ; k1 is the next continuation, we need to capture it
       (\ (v)         ; v is the value we want to fill in later
-         ((k0 v) k1) ; call the current continuation on v and pass it to the next  
+         ((k0 v) k1) ; apply the current continuation to v and pass it along
       )))
+
+;
+; Identity function.
+; 
+
+(def id (x)
+   "The identity function that return its argument."
+   x)
