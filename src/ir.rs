@@ -1,9 +1,4 @@
-use std::{
-    collections::{BTreeSet, HashSet},
-    fmt::Display,
-    rc::Rc,
-    str::FromStr,
-};
+use std::{collections::BTreeSet, fmt::Display, rc::Rc, str::FromStr};
 
 use bincode::{Decode, Encode};
 use strum_macros::EnumString;
@@ -386,7 +381,7 @@ impl Backquote {
 }
 
 impl Backquote {
-    fn from_atom(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    fn from_atom(value: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         match value.as_ref() {
             Atom::Pair(_, car, cdr) => {
                 let car = Self::from_unquote(car.clone(), macros)?;
@@ -398,7 +393,7 @@ impl Backquote {
         }
     }
 
-    fn from_unquote(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    fn from_unquote(value: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         if let Atom::Pair(_, car, cdr) = value.as_ref()
             && let Atom::Symbol(_, v) = car.as_ref()
         {
@@ -607,7 +602,7 @@ impl Statement {
         }
     }
 
-    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         match atom.as_ref() {
             Atom::Pair(..) => Self::from_pair(atom.clone(), macros),
             Atom::Symbol(_, sym) => Ok(Self::Symbol(atom.clone(), sym.clone())),
@@ -618,7 +613,7 @@ impl Statement {
         }
     }
 
-    fn from_pair(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    fn from_pair(atom: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         //
         // Split the atom.
         //
@@ -951,7 +946,7 @@ impl Statements {
             .unwrap_or_default()
     }
 
-    fn from_atom(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    fn from_atom(value: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         let inner = value
             .into_iter()
             .map(|v| Statement::from_atom(v, macros))
@@ -959,7 +954,7 @@ impl Statements {
         Ok(Self(inner))
     }
 
-    fn from_atom_quoted(value: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    fn from_atom_quoted(value: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         let inner = value
             .into_iter()
             .map(|v| {
@@ -1024,7 +1019,7 @@ impl TopLevelStatement {
         }
     }
 
-    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         //
         // Split the function call.
         //
@@ -1106,7 +1101,7 @@ impl ExternalDefinition {
         self.3
     }
 
-    pub fn from_atom(atom: Rc<Atom>, _: &HashSet<Box<str>>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, _: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         //
         // Extract the function name.
         //
@@ -1205,7 +1200,7 @@ impl FunctionDefinition {
         v
     }
 
-    pub fn from_atom(atom: Rc<Atom>, macros: &HashSet<Box<str>>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, macros: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         //
         // Extract the function name.
         //
@@ -1276,7 +1271,7 @@ impl ConstantDefinition {
         &self.1
     }
 
-    pub fn from_atom(atom: Rc<Atom>, _: &HashSet<Box<str>>) -> Result<Self, Error> {
+    pub fn from_atom(atom: Rc<Atom>, _: &BTreeSet<Box<str>>) -> Result<Self, Error> {
         //
         // Extract the value name.
         //

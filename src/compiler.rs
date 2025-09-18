@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     io::Read,
     rc::Rc,
 };
@@ -146,12 +146,12 @@ pub trait CompilerTrait: Clone {
 
 #[derive(Clone, Default)]
 pub struct Compiler {
-    consts: HashMap<Box<str>, Value>,
-    blocks: HashMap<Box<str>, Context>,
-    defuns: HashMap<Box<str>, Arity>,
-    macros: HashSet<Box<str>>,
-    exfuns: HashMap<Box<str>, ExternalDefinition>,
-    labels: HashMap<Box<str>, usize>,
+    consts: BTreeMap<Box<str>, Value>,
+    blocks: BTreeMap<Box<str>, Context>,
+    defuns: BTreeMap<Box<str>, Arity>,
+    macros: BTreeSet<Box<str>>,
+    exfuns: BTreeMap<Box<str>, ExternalDefinition>,
+    labels: BTreeMap<Box<str>, usize>,
     lcount: usize,
     ecount: usize,
 }
@@ -1404,7 +1404,7 @@ impl Compiler {
     fn lift(op: Operator) -> TopLevelStatement {
         let opname = op.to_string();
         let argcnt = op.arity();
-        let macros = HashSet::default();
+        let macros = BTreeSet::default();
         //
         // Build the argument list.
         //

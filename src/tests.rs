@@ -36,7 +36,7 @@ impl CompilerTrait for NullCompiler {
 //
 
 mod ir {
-    use std::{collections::HashSet, rc::Rc};
+    use std::rc::Rc;
 
     use crate::{atom::Atom, error::Error, grammar::ListsParser, ir::TopLevelStatement};
     use map_macro::btree_set;
@@ -52,7 +52,7 @@ mod ir {
         let atoms = parse("(def ADD (A B) (+ A B))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
+            .map(|v| TopLevelStatement::from_atom(v, &Default::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -65,7 +65,7 @@ mod ir {
         let atoms = parse("(def test(a) ((\\ (b) (+ a b)) 1))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
+            .map(|v| TopLevelStatement::from_atom(v, &Default::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -86,7 +86,7 @@ mod ir {
         );
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
+            .map(|v| TopLevelStatement::from_atom(v, &Default::default()))
             .collect::<Result<_, _>>()?;
         assert_eq!(btree_set! {}, defuns[0].closure());
         let stmt = defuns[0].statements().iter().next().unwrap();
@@ -103,7 +103,7 @@ mod ir {
         let atoms = parse("(def test(a) (let ((inc . (\\ (b) (+ a b)))) (- 2 (inc 1))))");
         let defuns: Vec<_> = atoms
             .into_iter()
-            .map(|v| TopLevelStatement::from_atom(v, &HashSet::default()))
+            .map(|v| TopLevelStatement::from_atom(v, &Default::default()))
             .collect::<Result<_, _>>()?;
         println!("{:?}", defuns);
         println!("{:?}", defuns[0].closure());
@@ -120,7 +120,6 @@ mod ir {
 //
 
 mod compiler {
-    use std::collections::HashSet;
 
     use crate::{
         compiler::{Artifacts, Compiler, CompilerTrait, Context, LabelOrOpCode},
@@ -139,7 +138,7 @@ mod compiler {
         let mut atoms = parser
             .parse(&mut compiler, stmt)
             .map_err(|e| Error::Parse(e.to_string()))?;
-        let stmt = Statement::from_atom(atoms.remove(0), &HashSet::default())?;
+        let stmt = Statement::from_atom(atoms.remove(0), &Default::default())?;
         //
         // Compile the statement.
         //
@@ -614,6 +613,18 @@ mod compiler {
             result.opcodes(),
             vec![
                 //
+                // (\ (b) ((\ () (+ a b)))
+                //
+                OpCode::Rot(3),                                  // [ret0, b, a]
+                OpCode::Get(1),                                  // [ret0, b, a, a]
+                OpCode::Get(3),                                  // [ret0, b, a, a, b]
+                OpCode::Psh(Immediate::Funcall(9, Arity::None)), // [ret0, b, a, a, b, fun0]
+                OpCode::Pak(3),                                  // [ret0, b, a, pak0]
+                OpCode::Call(0),                                 // [ret0, b, a, a+b]
+                OpCode::Rot(3),                                  // [ret0, a+b, b, a]
+                OpCode::Pop(2),                                  // [ret0, a+b]
+                OpCode::Ret,                                     // [a+b]
+                //
                 // (\ () (+ a b))
                 //
                 OpCode::Rot(3), // [ret0, a, b]
@@ -624,23 +635,11 @@ mod compiler {
                 OpCode::Pop(2), // [ret0, a+b]
                 OpCode::Ret,    // [a+b]
                 //
-                // (\ (b) ((\ () (+ a b)))
-                //
-                OpCode::Rot(3),                                  // [ret0, b, a]
-                OpCode::Get(1),                                  // [ret0, b, a, a]
-                OpCode::Get(3),                                  // [ret0, b, a, a, b]
-                OpCode::Psh(Immediate::Funcall(0, Arity::None)), // [ret0, b, a, a, b, fun0]
-                OpCode::Pak(3),                                  // [ret0, b, a, pak0]
-                OpCode::Call(0),                                 // [ret0, b, a, a+b]
-                OpCode::Rot(3),                                  // [ret0, a+b, b, a]
-                OpCode::Pop(2),                                  // [ret0, a+b]
-                OpCode::Ret,                                     // [a+b]
-                //
                 // (def test ..)
                 //
                 OpCode::Rot(2),                                     // [ret0, a]
                 OpCode::Get(1),                                     // [ret0, a, a]
-                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))), // [ret0, a, a, fun7]
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, a, a, fun7]
                 OpCode::Pak(2),                                     // [ret0, a, pak0]
                 OpCode::Psh(Immediate::Number(1)),                  // [ret0, a, pak0, 1]
                 OpCode::Get(2),                                     // [ret0, a, pak0, 1, pak0]
@@ -760,6 +759,16 @@ mod compiler {
             result.opcodes(),
             vec![
                 //
+                // count_args
+                //
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))),
+                OpCode::Call(1),
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret,
+                //
                 // count_args_r
                 //
                 OpCode::Rot(2),
@@ -767,22 +776,12 @@ mod compiler {
                 OpCode::Brn(8),
                 OpCode::Get(1),
                 OpCode::Cdr,
-                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))),
+                OpCode::Psh(Immediate::Funcall(7, Arity::Some(1))),
                 OpCode::Call(1),
                 OpCode::Psh(Immediate::Number(1)),
                 OpCode::Add,
                 OpCode::Br(2),
                 OpCode::Psh(Immediate::Number(0)),
-                OpCode::Rot(2),
-                OpCode::Pop(1),
-                OpCode::Ret,
-                //
-                // count_args
-                //
-                OpCode::Rot(2),
-                OpCode::Get(1),
-                OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))),
-                OpCode::Call(1),
                 OpCode::Rot(2),
                 OpCode::Pop(1),
                 OpCode::Ret,
@@ -793,7 +792,7 @@ mod compiler {
                 OpCode::Psh(Immediate::Number(3)),
                 OpCode::Psh(Immediate::Number(2)),
                 OpCode::Psh(Immediate::Number(1)),
-                OpCode::Psh(Immediate::Funcall(14, Arity::All)),
+                OpCode::Psh(Immediate::Funcall(0, Arity::All)),
                 OpCode::Call(4),
                 OpCode::Ret
             ]
@@ -851,6 +850,16 @@ mod compiler {
             result.opcodes(),
             vec![
                 //
+                // main().
+                //
+                OpCode::Psh(Immediate::Number(4)),
+                OpCode::Psh(Immediate::Number(3)),
+                OpCode::Psh(Immediate::Number(2)),
+                OpCode::Psh(Immediate::Number(1)),
+                OpCode::Psh(Immediate::Funcall(7, Arity::SomeWithRem(2))),
+                OpCode::Call(4),
+                OpCode::Ret,
+                //
                 // select().
                 //
                 OpCode::Rot(4), // [ret0, c, b, a]
@@ -862,16 +871,6 @@ mod compiler {
                 OpCode::Rot(4), // [ret0, res0, c, b, a]
                 OpCode::Pop(3), // [ret0, res0]
                 OpCode::Ret,    // [res0]
-                //
-                // main().
-                //
-                OpCode::Psh(Immediate::Number(4)),
-                OpCode::Psh(Immediate::Number(3)),
-                OpCode::Psh(Immediate::Number(2)),
-                OpCode::Psh(Immediate::Number(1)),
-                OpCode::Psh(Immediate::Funcall(0, Arity::SomeWithRem(2))),
-                OpCode::Call(4),
-                OpCode::Ret
             ]
         );
         Ok(())
