@@ -14,10 +14,13 @@ use sl::{
     stack,
     vm::VirtualMachine,
 };
+use strum_macros::EnumString;
 use thiserror::Error;
 
 #[derive(Parser)]
 struct Arguments {
+    #[arg(long)]
+    history_file: Option<String>,
     #[arg(short, long, default_value_t = 128)]
     stack_size: usize,
 }
@@ -50,8 +53,15 @@ enum Command {
     Expand(String),
     Inspect(String),
     Quit,
-    Trace,
-    Untrace,
+    Trace(Status),
+}
+
+#[derive(Default, EnumString)]
+#[strum(serialize_all = "lowercase")]
+enum Status {
+    On,
+    #[default]
+    Off,
 }
 
 impl FromStr for Command {
@@ -69,12 +79,28 @@ impl FromStr for Command {
         // Check the command.
         //
         match parts[0] {
+            //
+            // Expand.
+            //
             ".expand" if parts.len() >= 2 => Ok(Self::Expand(parts[1..].join(" "))),
+            ".expand" => Err(Error::MissingcommandParameter("symbol".into())),
+            //
+            // Inspect.
+            //
             ".inspect" if parts.len() >= 2 => Ok(Self::Inspect(parts[1].to_string())),
             ".inpect" => Err(Error::MissingcommandParameter("symbol".into())),
+            //
+            // Quit.
+            //
             ".quit" => Ok(Self::Quit),
-            ".trace" => Ok(Self::Trace),
-            ".untrace" => Ok(Self::Untrace),
+            //
+            // Trace.
+            //
+            ".trace" if parts.len() >= 2 => {
+                let status = Status::from_str(&parts[1]).unwrap_or_default();
+                Ok(Self::Trace(status))
+            }
+            ".trace" => Err(Error::MissingcommandParameter("symbol".into())),
             _ => Err(Error::InvalidCommand(s.to_string())),
         }
     }
@@ -288,7 +314,9 @@ fn main() -> Result<(), Error> {
     //
     // Load the history file.
     //
-    rl.load_history("history.txt").unwrap_or_default();
+    if let Some(file) = args.history_file.as_deref() {
+        rl.load_history(file).unwrap_or_default();
+    }
     //
     // Create the parser.
     //
@@ -329,11 +357,11 @@ fn main() -> Result<(), Error> {
                             continue;
                         }
                         Command::Quit => break,
-                        Command::Trace => {
+                        Command::Trace(Status::On) => {
                             trace = true;
                             continue;
                         }
-                        Command::Untrace => {
+                        Command::Trace(Status::Off) => {
                             trace = false;
                             continue;
                         }
@@ -385,7 +413,9 @@ fn main() -> Result<(), Error> {
     //
     // Save the history file.
     //
-    rl.save_history("history.txt").unwrap_or_default();
+    if let Some(file) = args.history_file.as_deref() {
+        rl.save_history(file).unwrap_or_default();
+    }
     //
     // Done.
     //
