@@ -24,6 +24,7 @@ use crate::{
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Context {
+    name: Box<str>,
     arity: Arity,
     locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
@@ -31,8 +32,9 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    fn new(arity: Arity) -> Self {
+    fn new(name: Box<str>, arity: Arity) -> Self {
         Self {
+            name,
             arity,
             locals: HashMap::default(),
             stackn: 0,
@@ -329,8 +331,7 @@ impl CompilerTrait for Compiler {
                     let (addr, argcnt) = defuns
                         .iter()
                         .find_map(|(k, a, n)| (k == &sym).then_some((*a, *n)))
-                        .ok_or(Error::InvalidSymbol(sym))
-                        .unwrap();
+                        .ok_or(Error::InvalidSymbol(sym))?;
                     //
                     // Push the funcall.
                     //
@@ -566,7 +567,7 @@ impl Compiler {
     fn compile_function(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
-        let mut ctxt = Context::new(arity);
+        let mut ctxt = Context::new(defun.name().clone(), arity);
         //
         // Track the function arguments.
         //
@@ -726,13 +727,21 @@ impl Compiler {
                     return Err(Error::ExpectedSymbol(Span::None));
                 };
                 //
+                // Check for the self applicator.
+                //
+                let symbol = if symbol.as_ref() == "self" {
+                    ctxt.name.clone()
+                } else {
+                    symbol.clone()
+                };
+                //
                 // Compile the arguments.
                 //
                 self.compile_arguments(ctxt, args)?;
                 //
                 // Grab the argument count.
                 //
-                let arity = self.defuns.get(symbol).copied().unwrap();
+                let arity = self.defuns.get(&symbol).copied().unwrap();
                 //
                 // Pack the arguments depending on the arity.
                 //
@@ -877,15 +886,22 @@ impl Compiler {
                 self.compile_statement(ctxt, &stmt)
             }
             Statement::Lambda(_, args, statements) => {
-                let mut next = Context::new(args.arity());
                 //
                 // Generate a name for the lambda.
                 //
                 let name = self.label("LAMBDA");
                 //
+                // Build the next context.
+                //
+                let mut next = Context::new(name.clone(), args.arity());
+                //
                 // Grab the closure.
                 //
                 let mut closure = stmt.closure();
+                //
+                // Remove self from the closure.
+                //
+                closure.remove("self");
                 //
                 // Remove the global symbols from the closure.
                 //
@@ -1012,10 +1028,11 @@ impl Compiler {
                     Operator::Conc => OpCode::Conc.into(),
                     Operator::Cons => OpCode::Cons.into(),
                     //
-                    // String.
+                    // Bytes, string, and symbol.
                     //
                     Operator::Bytes => OpCode::Bytes.into(),
                     Operator::Str => OpCode::Str.into(),
+                    Operator::Sym => OpCode::Sym.into(),
                     Operator::Unpack => OpCode::Unpack.into(),
                     //
                     // Predicates.
@@ -1297,7 +1314,13 @@ impl Compiler {
                 Self::value_opcode(ctxt, value)
             }
             None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
-            None => LabelOrOpCode::Funcall(sym.clone()),
+            None => {
+                if sym.as_ref() == "self" {
+                    LabelOrOpCode::Funcall(ctxt.name.clone())
+                } else {
+                    LabelOrOpCode::Funcall(sym.clone())
+                }
+            }
         };
         //
         // Push the opcode.

@@ -62,6 +62,8 @@ pub enum Error {
     OpenSelfImage,
     #[error("Parse error: {0}")]
     Parse(String),
+    #[error("Reserved keyworkd: {0}")]
+    ReservedKeyword(Box<str>),
     #[error("Unquote outside backquote context")]
     UnquoteOutsideBackquote(Span),
     #[error("Unresolved symbol: {0}")]

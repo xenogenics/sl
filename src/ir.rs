@@ -187,6 +187,24 @@ impl TryFrom<Rc<Atom>> for ExternalArguments {
 }
 
 //
+// Keywords.
+//
+
+#[derive(EnumString)]
+#[strum(serialize_all = "lowercase")]
+enum Keyword {
+    Def,
+    Ext,
+    If,
+    Let,
+    Mac,
+    Prog,
+    #[strum(serialize = "self")]
+    This,
+    Val,
+}
+
+//
 // Built-in operator.
 //
 
@@ -247,12 +265,14 @@ pub enum Operator {
     #[strum(serialize = "cons")]
     Cons,
     //
-    // Bytes operation.
+    // Bytes, string, and symbol operations.
     //
     #[strum(serialize = "bytes")]
     Bytes,
     #[strum(serialize = "str")]
     Str,
+    #[strum(serialize = "sym")]
+    Sym,
     #[strum(serialize = "unpack")]
     Unpack,
     //
@@ -300,6 +320,7 @@ impl Operator {
             Operator::Cons => 2,
             Operator::Bytes => 1,
             Operator::Str => 1,
+            Operator::Sym => 1,
             Operator::Unpack => 1,
             Operator::IsChr => 1,
             Operator::IsNum => 1,
@@ -716,6 +737,12 @@ impl Statement {
                                 return Err(Error::ExpectedSymbol(symbol.span()));
                             };
                             //
+                            // Make sure it's not a reserved keyword.
+                            //
+                            if Keyword::from_str(symbol).is_ok() {
+                                return Err(Error::ReservedKeyword(name.clone()));
+                            }
+                            //
                             // Parse the statement.
                             //
                             let v = Statement::from_atom(stmt.clone(), macros)?;
@@ -850,7 +877,7 @@ impl Statement {
         match self {
             Statement::Apply(_, stmt, _, location) => {
                 if let Statement::Symbol(_, v) = stmt.as_ref()
-                    && name == v.as_ref()
+                    && (v.as_ref() == name || v.as_ref() == "self")
                 {
                     *location = CallSite::Tail;
                 }
@@ -1115,6 +1142,12 @@ impl ExternalDefinition {
             return Err(Error::ExpectedSymbol(name.span()));
         };
         //
+        // Make sure it's not a reserved keyword.
+        //
+        if Keyword::from_str(name).is_ok() {
+            return Err(Error::ReservedKeyword(name.clone()));
+        }
+        //
         // Extract the symbol name.
         //
         let Atom::Pair(_, symbol, rem) = rem.as_ref() else {
@@ -1214,6 +1247,12 @@ impl FunctionDefinition {
             return Err(Error::ExpectedSymbol(name.span()));
         };
         //
+        // Make sure it's not a reserved keyword.
+        //
+        if Keyword::from_str(name).is_ok() {
+            return Err(Error::ReservedKeyword(name.clone()));
+        }
+        //
         // Extract the arguments.
         //
         let Atom::Pair(_, args, rem) = rem.as_ref() else {
@@ -1284,6 +1323,12 @@ impl ConstantDefinition {
         let Atom::Symbol(_, name) = name.as_ref() else {
             return Err(Error::ExpectedSymbol(name.span()));
         };
+        //
+        // Make sure it's not a reserved keyword.
+        //
+        if Keyword::from_str(name).is_ok() {
+            return Err(Error::ReservedKeyword(name.clone()));
+        }
         //
         // Extract the value.
         //

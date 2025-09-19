@@ -137,10 +137,11 @@ pub enum OpCode {
     Conc,
     Cons,
     //
-    // Bytes operation.
+    // Bytes, string, and symbol operations.
     //
     Bytes,
     Str,
+    Sym,
     Unpack,
     //
     // Predicates.

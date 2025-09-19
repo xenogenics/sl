@@ -329,6 +329,25 @@ impl VirtualMachine {
                     };
                     self.stack.push(value);
                 }
+                OpCode::Sym => {
+                    let value = match self.stack.pop() {
+                        Value::Heap(v) => match v.as_ref() {
+                            heap::Value::String(v) => {
+                                let bytes = v.as_bytes();
+                                if bytes.len() > 15 {
+                                    Value::Immediate(Immediate::Nil)
+                                } else {
+                                    let mut raw = [0; 15];
+                                    raw[0..bytes.len()].copy_from_slice(bytes);
+                                    Value::Immediate(Immediate::Symbol(raw))
+                                }
+                            }
+                            _ => Value::Immediate(Immediate::Nil),
+                        },
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
                 OpCode::Unpack => {
                     let value = match self.stack.pop() {
                         Value::Heap(v) => match v.as_ref() {
