@@ -13,7 +13,7 @@ extern {
 
 match {
 	"(", ")", ".", "`", "'", ",", ",@", "~",
-	r"\^([!-\[]|[\]-~]|\\\\|\\e|\\n|\\r|\\t)" => Char,
+	r"\^([!-\[]|[\]-~]|\\\\|\\e|\\n|\\r|\\s|\\t)" => Char,
 	r"-?[0-9]+" => Number,
 	r"x[0-9A-F]+" => HexNumber,
 	r#""([^"\\]|\\["\\0\\e\\n\\r\\t])*""# => String,
@@ -88,7 +88,10 @@ List: Rc<Atom> = {
 }
 
 Terminal: Rc<Atom> = {
-	Char      => Atom::char(<>.as_bytes()[1]),
+	Char      => {
+	  let mut chars = <>[1..].chars();
+	  Atom::char(Atom::next_char(&mut chars).unwrap() as u8)
+	},
 	Number    => Atom::number(<>.parse().unwrap()),
 	HexNumber => Atom::number(i64::from_str_radix(&<>[1..], 16).unwrap()), 
 	String    => Atom::string(<>),

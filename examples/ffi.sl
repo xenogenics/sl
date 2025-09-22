@@ -5,6 +5,6 @@
         (buf . (bytes 8))
         (res . (read fd buf 8)))
     (close fd)
-    `(,res ,(str (take (- res 1) (unpack buf))))
+    `(,res ,(str (take (- res 1) (split buf))))
   ))
           

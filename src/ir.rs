@@ -221,6 +221,8 @@ pub enum Operator {
     Mul,
     #[strum(serialize = "/")]
     Div,
+    #[strum(serialize = "%")]
+    Mod,
     #[strum(serialize = ">=")]
     Ge,
     #[strum(serialize = ">")]
@@ -269,15 +271,19 @@ pub enum Operator {
     //
     #[strum(serialize = "bytes")]
     Bytes,
+    #[strum(serialize = "chr")]
+    Chr,
+    #[strum(serialize = "split")]
+    Split,
     #[strum(serialize = "str")]
     Str,
     #[strum(serialize = "sym")]
     Sym,
-    #[strum(serialize = "unpack")]
-    Unpack,
     //
     // Predicates.
     //
+    #[strum(serialize = "byt?")]
+    IsByt,
     #[strum(serialize = "chr?")]
     IsChr,
     #[strum(serialize = "num?")]
@@ -286,6 +292,8 @@ pub enum Operator {
     IsLst,
     #[strum(serialize = "nil?")]
     IsNil,
+    #[strum(serialize = "str?")]
+    IsStr,
     #[strum(serialize = "sym?")]
     IsSym,
     #[strum(serialize = "tru?")]
@@ -301,6 +309,7 @@ impl Operator {
             Operator::Sub => 2,
             Operator::Mul => 2,
             Operator::Div => 2,
+            Operator::Mod => 2,
             Operator::Ge => 2,
             Operator::Gt => 2,
             Operator::Le => 2,
@@ -319,13 +328,16 @@ impl Operator {
             Operator::Conc => 2,
             Operator::Cons => 2,
             Operator::Bytes => 1,
+            Operator::Chr => 1,
             Operator::Str => 1,
             Operator::Sym => 1,
-            Operator::Unpack => 1,
+            Operator::Split => 1,
+            Operator::IsByt => 1,
             Operator::IsChr => 1,
             Operator::IsNum => 1,
             Operator::IsLst => 1,
             Operator::IsNil => 1,
+            Operator::IsStr => 1,
             Operator::IsSym => 1,
             Operator::IsTru => 1,
             Operator::IsWld => 1,

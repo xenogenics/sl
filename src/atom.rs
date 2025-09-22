@@ -1,4 +1,4 @@
-use std::{ops::Add, rc::Rc};
+use std::{ops::Add, rc::Rc, str::Chars};
 
 use crate::{error::Error, heap, opcodes, stack};
 
@@ -120,25 +120,11 @@ impl Atom {
          */
         let v = v.trim_matches('"');
         /*
-         * Parse the escape sequences.
+         * Get the next character.
          */
         let mut chars = v.chars();
-        while let Some(c) = chars.next() {
-            if c == '\\' {
-                match chars.next() {
-                    Some('0') => result.push('\0'),
-                    Some('e') => result.push('\x1B'),
-                    Some('n') => result.push('\n'),
-                    Some('r') => result.push('\r'),
-                    Some('t') => result.push('\t'),
-                    Some('"') => result.push('"'),
-                    Some('\\') => result.push('\\'),
-                    Some(c) => result.push(c), // Handle invalid escape
-                    None => break,
-                }
-            } else {
-                result.push(c);
-            }
+        while let Some(c) = Self::next_char(&mut chars) {
+            result.push(c);
         }
         /*
          * Done.
@@ -156,6 +142,26 @@ impl Atom {
 
     pub fn wildcard() -> Rc<Atom> {
         Self::Wildcard(Span::None).into()
+    }
+
+    pub fn next_char(chars: &mut Chars<'_>) -> Option<char> {
+        chars.next().and_then(|c| {
+            if c == '\\' {
+                match chars.next() {
+                    Some('0') => Some('\0'),
+                    Some('e') => Some('\x1B'),
+                    Some('n') => Some('\n'),
+                    Some('r') => Some('\r'),
+                    Some('s') => Some(' '),
+                    Some('t') => Some('\t'),
+                    Some('"') => Some('"'),
+                    Some('\\') => Some('\\'),
+                    v => v,
+                }
+            } else {
+                Some(c)
+            }
+        })
     }
 }
 
@@ -230,7 +236,17 @@ impl std::fmt::Display for Atom {
         match self {
             Atom::Nil(_) => write!(f, "nil"),
             Atom::True(_) => write!(f, "T"),
-            Atom::Char(_, c) => write!(f, "^{}", *c as char),
+            Atom::Char(_, c) => match *c as char {
+                '\0' => write!(f, "^\\0"),
+                '\x1B' => write!(f, "^\\e"),
+                '\n' => write!(f, "^\\n"),
+                '\r' => write!(f, "^\\r"),
+                ' ' => write!(f, "^\\s"),
+                '\t' => write!(f, "^\\t"),
+                '"' => write!(f, "^\""),
+                '\\' => write!(f, "^\\"),
+                _ => write!(f, "^{}", *c as char),
+            },
             Atom::Number(_, n) => write!(f, "{n}"),
             Atom::Pair(..) => {
                 write!(f, "(")?;

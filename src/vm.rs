@@ -114,6 +114,12 @@ impl VirtualMachine {
                     let v = Value::from(Immediate::Number(a / b));
                     self.stack.push(v);
                 }
+                OpCode::Mod => {
+                    let a = self.stack.pop().as_immediate().as_number();
+                    let b = self.stack.pop().as_immediate().as_number();
+                    let v = Value::from(Immediate::Number(a % b));
+                    self.stack.push(v);
+                }
                 OpCode::Ge => {
                     let a = self.stack.pop().as_immediate().as_number();
                     let b = self.stack.pop().as_immediate().as_number();
@@ -306,6 +312,63 @@ impl VirtualMachine {
                     };
                     self.stack.push(value);
                 }
+                OpCode::Chr => {
+                    let value = match self.stack.pop() {
+                        Value::Immediate(imm) => match imm {
+                            Immediate::Number(n) => Value::Immediate(Immediate::Char(n as u8)),
+                            Immediate::Char(_) => Value::Immediate(imm),
+                            _ => Value::Immediate(Immediate::Nil),
+                        },
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
+                OpCode::Split => {
+                    let value = match self.stack.pop() {
+                        Value::Heap(v) => match v.as_ref() {
+                            heap::Value::Bytes(v) => {
+                                let value = v.iter().rev().fold(
+                                    heap::Value::Immediate(Immediate::Nil),
+                                    |acc, v| {
+                                        heap::Value::Pair(
+                                            Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
+                                            Rc::new(acc),
+                                        )
+                                    },
+                                );
+                                Value::Heap(Rc::new(value))
+                            }
+                            heap::Value::String(v) => {
+                                let value = v.as_bytes().iter().rev().fold(
+                                    heap::Value::Immediate(Immediate::Nil),
+                                    |acc, v| {
+                                        heap::Value::Pair(
+                                            Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
+                                            Rc::new(acc),
+                                        )
+                                    },
+                                );
+                                Value::Heap(Rc::new(value))
+                            }
+                            _ => Value::Immediate(Immediate::Nil),
+                        },
+                        Value::Immediate(Immediate::Symbol(v)) => {
+                            let pos = v.iter().position(|v| *v == 0).unwrap_or(v.len());
+                            let value = v[..pos].iter().rev().fold(
+                                heap::Value::Immediate(Immediate::Nil),
+                                |acc, v| {
+                                    heap::Value::Pair(
+                                        Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
+                                        Rc::new(acc),
+                                    )
+                                },
+                            );
+                            Value::Heap(Rc::new(value))
+                        }
+                        _ => Value::Immediate(Immediate::Nil),
+                    };
+                    self.stack.push(value);
+                }
                 OpCode::Str => {
                     let value = match self.stack.pop() {
                         Value::Heap(v) => {
@@ -348,30 +411,16 @@ impl VirtualMachine {
                     };
                     self.stack.push(value);
                 }
-                OpCode::Unpack => {
-                    let value = match self.stack.pop() {
-                        Value::Heap(v) => match v.as_ref() {
-                            heap::Value::Bytes(v) => {
-                                let value = v.iter().rev().fold(
-                                    heap::Value::Immediate(Immediate::Nil),
-                                    |acc, v| {
-                                        heap::Value::Pair(
-                                            Rc::new(heap::Value::Immediate(Immediate::Char(*v))),
-                                            Rc::new(acc),
-                                        )
-                                    },
-                                );
-                                Value::Heap(Rc::new(value))
-                            }
-                            _ => Value::Immediate(Immediate::Nil),
-                        },
-                        _ => Value::Immediate(Immediate::Nil),
-                    };
-                    self.stack.push(value);
-                }
                 //
                 // Predicates.
                 //
+                OpCode::IsByt => {
+                    let r = match self.stack.pop() {
+                        Value::Heap(value) => matches!(value.as_ref(), heap::Value::Bytes(..)),
+                        _ => false,
+                    };
+                    self.stack.push(Value::Immediate(r.into()));
+                }
                 OpCode::IsChr => {
                     let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Char(_)));
                     self.stack.push(Value::Immediate(r.into()));
@@ -390,6 +439,13 @@ impl VirtualMachine {
                 }
                 OpCode::IsNil => {
                     let r = matches!(self.stack.pop(), Value::Immediate(Immediate::Nil));
+                    self.stack.push(Value::Immediate(r.into()));
+                }
+                OpCode::IsStr => {
+                    let r = match self.stack.pop() {
+                        Value::Heap(value) => matches!(value.as_ref(), heap::Value::String(..)),
+                        _ => false,
+                    };
                     self.stack.push(Value::Immediate(r.into()));
                 }
                 OpCode::IsSym => {

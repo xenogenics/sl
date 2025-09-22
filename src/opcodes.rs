@@ -70,7 +70,18 @@ impl std::fmt::Display for Immediate {
         match self {
             Immediate::Nil => write!(f, "nil"),
             Immediate::True => write!(f, "T"),
-            Immediate::Char(c) => write!(f, "^{}", *c as char),
+            Immediate::Char(c) => match *c as char {
+                '\0' => write!(f, "^\\0"),
+                '\x1B' => write!(f, "^\\e"),
+                '\n' => write!(f, "^\\n"),
+                '\r' => write!(f, "^\\r"),
+                ' ' => write!(f, "^\\s"),
+                '\t' => write!(f, "^\\t"),
+                '"' => write!(f, "^\""),
+                '\\' => write!(f, "^\\"),
+                _ => write!(f, "^{}", *c as char),
+            },
+
             Immediate::Number(n) => write!(f, "{n}"),
             Immediate::Extcall(v) => write!(f, "#X({v})",),
             Immediate::Funcall(v, arity) => write!(f, "#F({v},{arity})"),
@@ -110,6 +121,7 @@ pub enum OpCode {
     Sub,
     Mul,
     Div,
+    Mod,
     Ge,
     Gt,
     Le,
@@ -140,16 +152,19 @@ pub enum OpCode {
     // Bytes, string, and symbol operations.
     //
     Bytes,
+    Chr,
+    Split,
     Str,
     Sym,
-    Unpack,
     //
     // Predicates.
     //
+    IsByt,
     IsChr,
     IsLst,
     IsNil,
     IsNum,
+    IsStr,
     IsSym,
     IsTru,
     IsWld,

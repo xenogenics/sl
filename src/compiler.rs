@@ -1001,6 +1001,7 @@ impl Compiler {
                     Operator::Sub => OpCode::Sub.into(),
                     Operator::Mul => OpCode::Mul.into(),
                     Operator::Div => OpCode::Div.into(),
+                    Operator::Mod => OpCode::Mod.into(),
                     Operator::Ge => OpCode::Ge.into(),
                     Operator::Gt => OpCode::Gt.into(),
                     Operator::Le => OpCode::Le.into(),
@@ -1031,16 +1032,19 @@ impl Compiler {
                     // Bytes, string, and symbol.
                     //
                     Operator::Bytes => OpCode::Bytes.into(),
+                    Operator::Chr => OpCode::Chr.into(),
                     Operator::Str => OpCode::Str.into(),
                     Operator::Sym => OpCode::Sym.into(),
-                    Operator::Unpack => OpCode::Unpack.into(),
+                    Operator::Split => OpCode::Split.into(),
                     //
                     // Predicates.
                     //
+                    Operator::IsByt => OpCode::IsByt.into(),
                     Operator::IsChr => OpCode::IsChr.into(),
                     Operator::IsNum => OpCode::IsNum.into(),
                     Operator::IsLst => OpCode::IsLst.into(),
                     Operator::IsNil => OpCode::IsNil.into(),
+                    Operator::IsStr => OpCode::IsStr.into(),
                     Operator::IsSym => OpCode::IsSym.into(),
                     Operator::IsTru => OpCode::IsTru.into(),
                     Operator::IsWld => OpCode::IsWld.into(),
