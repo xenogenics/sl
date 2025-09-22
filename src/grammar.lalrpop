@@ -4,6 +4,7 @@ use lalrpop_util::ParseError;
 
 use crate::atom::{Atom, Span};
 use crate::compiler::CompilerTrait;
+use crate::vm::RunParameters;
 
 grammar<C>(compiler: &mut C) where C: CompilerTrait;
 
@@ -41,7 +42,8 @@ pub Lists: Vec<Rc<Atom>> = {
 pub Expression: Rc<Atom> = {
 	<start:@L> "~" <e:Atom> <end:@R> =>? {
 		let comp = compiler.clone();
-		let rslt = comp.eval(e, 1024, false).map_err(|error| ParseError::User { error })?;
+		let params = RunParameters::default();
+		let rslt = comp.eval(e, params).map_err(|error| ParseError::User { error })?;
 		Ok(rslt.with_span(Span::Offset(start, end)))
 	},
 	<start:@L> "'"  <e:Atom> <end:@R> => {

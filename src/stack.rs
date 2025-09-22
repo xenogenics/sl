@@ -22,7 +22,7 @@ impl std::fmt::Display for Closure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let vals = self.vals.to_vec();
         let vals: Vec<_> = vals.into_iter().map(|v| v.to_string()).collect();
-        write!(f, "K({}, {})", self.args, vals.join(","))
+        write!(f, "K({},{})", self.args, vals.join(","))
     }
 }
 
@@ -118,6 +118,10 @@ pub struct Stack(Vec<Value>);
 impl Stack {
     pub fn new(capacity: usize) -> Self {
         Self(Vec::with_capacity(capacity))
+    }
+
+    pub fn iter(&self) -> impl std::iter::DoubleEndedIterator<Item = &Value> {
+        self.0.iter()
     }
 
     pub fn push(&mut self, v: Value) {

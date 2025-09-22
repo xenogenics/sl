@@ -1,4 +1,4 @@
-use std::{rc::Rc, str::FromStr};
+use std::{io::Read, rc::Rc, str::FromStr};
 
 use clap::{Parser, arg};
 use lalrpop_util::ParseError;
@@ -10,9 +10,9 @@ use rustyline::{
 use sl::{
     atom::Atom,
     compiler::{Artifacts, Compiler, CompilerTrait},
-    grammar::ExpressionParser,
+    grammar::{ExpressionParser, ListsParser},
     stack,
-    vm::VirtualMachine,
+    vm::{RunParameters, VirtualMachine},
 };
 use strum_macros::EnumString;
 use thiserror::Error;
@@ -21,6 +21,8 @@ use thiserror::Error;
 struct Arguments {
     #[arg(long)]
     history_file: Option<String>,
+    #[arg(short, long, value_delimiter = ',')]
+    preload: Vec<String>,
     #[arg(short, long, default_value_t = 128)]
     stack_size: usize,
 }
@@ -41,6 +43,8 @@ enum Error {
     Io(#[from] std::io::Error),
     #[error("Missing command parameter: {0}")]
     MissingcommandParameter(String),
+    #[error("Parse error: {0}")]
+    Parse(String),
     #[error("Readline error: {0}")]
     Readline(#[from] ReadlineError),
 }
@@ -50,6 +54,7 @@ enum Error {
 //
 
 enum Command {
+    Depth(usize),
     Expand(String),
     Inspect(String),
     Quit,
@@ -80,6 +85,14 @@ impl FromStr for Command {
         //
         match parts[0] {
             //
+            // Depth.
+            //
+            ".depth" if parts.len() >= 2 => {
+                let status = usize::from_str(&parts[1]).unwrap_or_default();
+                Ok(Self::Depth(status))
+            }
+            ".depth" => Err(Error::MissingcommandParameter("symbol".into())),
+            //
             // Expand.
             //
             ".expand" if parts.len() >= 2 => Ok(Self::Expand(parts[1..].join(" "))),
@@ -101,6 +114,9 @@ impl FromStr for Command {
                 Ok(Self::Trace(status))
             }
             ".trace" => Err(Error::MissingcommandParameter("symbol".into())),
+            //
+            // Invalid command.
+            //
             _ => Err(Error::InvalidCommand(s.to_string())),
         }
     }
@@ -114,11 +130,11 @@ impl FromStr for Command {
 struct NullCompiler;
 
 impl CompilerTrait for NullCompiler {
-    fn eval(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, sl::error::Error> {
+    fn eval(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, sl::error::Error> {
         Ok(Atom::nil())
     }
 
-    fn expand(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, sl::error::Error> {
+    fn expand(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, sl::error::Error> {
         Ok(Atom::nil())
     }
 
@@ -202,7 +218,7 @@ fn expand(mut compiler: Compiler, stmt: &str) -> Result<(), sl::error::Error> {
     //
     // Expand the macro.
     //
-    match compiler.expand(atom, 1024, false) {
+    match compiler.expand(atom, RunParameters::default()) {
         Ok(value) => println!("{value}"),
         Err(err) => println!("! {err}"),
     }
@@ -262,8 +278,7 @@ fn inspect(compiler: Compiler, name: &str) -> Result<(), sl::error::Error> {
 fn eval(
     mut compiler: Compiler,
     expr: Rc<Atom>,
-    stack_size: usize,
-    trace: bool,
+    params: RunParameters,
 ) -> Result<stack::Value, sl::error::Error> {
     //
     // Wrap the statement into a top-level function.
@@ -289,7 +304,7 @@ fn eval(
     //
     // Build the virtual machine.
     //
-    let mut vm = VirtualMachine::new("__repl__", stack_size, trace);
+    let mut vm = VirtualMachine::new("__repl__", params);
     //
     // Run.
     //
@@ -306,6 +321,7 @@ fn main() -> Result<(), Error> {
     //
     let args = Arguments::parse();
     let mut trace = false;
+    let mut depth = 10;
     //
     // Create the line editor.
     //
@@ -326,6 +342,24 @@ fn main() -> Result<(), Error> {
     //
     let mut compiler = Compiler::default();
     compiler.lift_operators()?;
+    //
+    // Process the files to preload.
+    //
+    for preload in args.preload.as_slice() {
+        //
+        // Read the file.
+        //
+        let mut source = String::new();
+        let mut file = std::fs::File::open(preload)?;
+        file.read_to_string(&mut source)?;
+        //
+        // Parse the file.
+        //
+        let parser = ListsParser::new();
+        let _ = parser
+            .parse(&mut compiler, &source)
+            .map_err(|v| Error::Parse(v.to_string()))?;
+    }
     //
     // REPL.
     //
@@ -348,6 +382,10 @@ fn main() -> Result<(), Error> {
                 //
                 if let Ok(cmd) = Command::from_str(line.trim()) {
                     match cmd {
+                        Command::Depth(value) => {
+                            depth = value;
+                            continue;
+                        }
                         Command::Expand(statement) => {
                             expand(compiler.clone(), &statement)?;
                             continue;
@@ -389,9 +427,13 @@ fn main() -> Result<(), Error> {
                     },
                 }
                 //
+                // Build the run parameters.
+                //
+                let params = RunParameters::new(args.stack_size, trace, depth);
+                //
                 // Try to evaluate the statement.
                 //
-                match eval(compiler.clone(), atom, args.stack_size, trace) {
+                match eval(compiler.clone(), atom, params) {
                     Ok(value) => println!("{value}"),
                     Err(error) => println!("! {error}"),
                 }

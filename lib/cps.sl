@@ -18,13 +18,12 @@
     ; Apply the continuation k to the lambda. The content of the lambda is
     ; rewritten in continuation-passing style.
     ; 
-    ((\ (_) _) . (let ((arg . (car (cdr it)))
-                       (exp . (car (cdr (cdr it)))))
-                   `(\ (k) (
-                      k
+    ((\ _ _) . (let ((arg . (car (cdr it)))
+                     (exp . (car (cdr (cdr it)))))
+                   `(\ (#k) (
+                      #k
                       (\ ,arg ,(cps exp))
-                    ))
-                 ))
+               ))))
     ;
     ; Single argument application.
     ;
@@ -34,14 +33,13 @@
     ; 
     ((_ _) . (let ((e0 . (car it))
                    (e1 . (car (cdr it))))
-               `(\ (k) (
+               `(\ (#k) (
                    ,(cps e0)
-                   (\ (e0) (
-                      ,(cps e1)
-                       (\ (e1)
-                          ((e0 e1) k))
-                ))))
-             ))
+                   (\ (#e0) (
+                     ,(cps e1)
+                     (\ (#e1)
+                       ((#e0 #e1) #k))
+             ))))))
     ;
     ; Two arguments application.
     ;
@@ -52,16 +50,15 @@
     ((_ _ _) . (let ((e0 . (car it))
                      (e1 . (car (cdr it)))
                      (e2 . (car (cdr (cdr it)))))
-                 `(\ (k) (
+                 `(\ (#k) (
                      ,(cps e0)
-                     (\ (e0) (
+                     (\ (#e0) (
                         ,(cps e1)
-                        (\ (e1) (
+                        (\ (#e1) (
                            ,(cps e2)
-                           (\ (e2)
-                              ((e0 e1 e2) k))
-                  ))))))
-               ))
+                           (\ (#e2)
+                             ((#e0 #e1 #e2) #k))
+               ))))))))
     ;
     ; (call/cc p).
     ;
@@ -74,16 +71,16 @@
     ; p. p will produce a result, turning it into (\ (k1) (k1 X)), which applied
     ; to k will produce (k X), with k being the outer continuation. 
     ;
-    (call/cc . `(\ (k0)
-                   (k0 (\ (pp)
-                          (\ (kn) (
-                             (pp (\ (a) (\ (k1) (k1 a))))
-                             kn
+    (call/cc . `(\ (#k0)
+                   (#k0 (\ (#pp)
+                          (\ (#kn) (
+                            (#pp (\ (#v) (\ (#k1) (#k1 #v))))
+                            #kn
                           ))))))
     ;
     ; Any other value.
     ; 
-    (_ . `(\ (k) (k ,it)))
+    (_ . `(\ (#k#) (#k# ,it)))
   ))
 
 ;

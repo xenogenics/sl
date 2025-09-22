@@ -1,5 +1,8 @@
 use clap::{Parser, arg};
-use sl::{compiler::Artifacts, vm::VirtualMachine};
+use sl::{
+    compiler::Artifacts,
+    vm::{RunParameters, VirtualMachine},
+};
 use thiserror::Error;
 
 #[derive(Parser)]
@@ -10,6 +13,14 @@ struct Arguments {
     stack_size: usize,
     #[arg(long)]
     trace: bool,
+    #[arg(long)]
+    depth: usize,
+}
+
+impl Into<RunParameters> for Arguments {
+    fn into(self) -> RunParameters {
+        RunParameters::new(self.stack_size, self.trace, self.depth)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -39,7 +50,8 @@ fn main() -> Result<(), Error> {
     //
     // Build the virtual machine.
     //
-    let mut vm = VirtualMachine::new("main", args.stack_size, args.trace);
+    let params: RunParameters = args.into();
+    let mut vm = VirtualMachine::new("main", params);
     //
     // Run the binary.
     //

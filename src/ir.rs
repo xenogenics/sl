@@ -303,7 +303,7 @@ pub enum Operator {
 }
 
 impl Operator {
-    pub fn arity(&self) -> usize {
+    pub fn argument_count(&self) -> usize {
         match self {
             Operator::Add => 2,
             Operator::Sub => 2,
@@ -549,6 +549,7 @@ pub enum Statement {
     // Symbol & value.
     //
     Symbol(Rc<Atom>, Box<str>),
+    This(Rc<Atom>),
     Value(Rc<Atom>, Value),
 }
 
@@ -565,6 +566,7 @@ impl Statement {
             | Statement::Backquote(atom, _)
             | Statement::Quote(atom, _)
             | Statement::Symbol(atom, _)
+            | Statement::This(atom)
             | Statement::Value(atom, _) => atom.clone(),
         }
     }
@@ -815,11 +817,17 @@ impl Statement {
                         //
                         // Process the arguments.
                         //
-                        let stmts = Statements::from_atom(rem.clone(), macros)?;
+                        let args = Statements::from_atom(rem.clone(), macros)?;
+                        //
+                        // Check the number of arguments.
+                        //
+                        if args.len() > op.argument_count() {
+                            return Err(Error::TooManyArguments(atom.span()));
+                        }
                         //
                         // If there is enough arguments, generate an operator call.
                         //
-                        let stmt = if stmts.len() >= op.arity() {
+                        let stmt = if args.len() == op.argument_count() {
                             Box::new(Statement::Operator(Atom::symbol(v), op))
                         }
                         //
@@ -831,11 +839,16 @@ impl Statement {
                         //
                         // Done.
                         //
-                        Ok(Self::Apply(atom, stmt, stmts, CallSite::Any))
+                        Ok(Self::Apply(atom, stmt, args, CallSite::Any))
                     }
                     Err(_) if macros.contains(v) => {
                         let stmts = Statements::from_atom_quoted(rem.clone(), macros)?;
                         Ok(Self::Expand(atom.clone(), name.clone(), stmts))
+                    }
+                    Err(_) if v == "self" => {
+                        let stmt = Box::new(Statement::This(sym.clone()));
+                        let stmts = Statements::from_atom(rem.clone(), macros)?;
+                        Ok(Self::Apply(atom, stmt, stmts, CallSite::Any))
                     }
                     Err(_) => {
                         let stmt = Box::new(Statement::Symbol(sym.clone(), name.clone()));
@@ -885,28 +898,51 @@ impl Statement {
         }
     }
 
-    fn identify_tail_calls(&mut self, name: &str) {
+    fn identify_tail_calls(&mut self, name: &str, args: &Arguments) {
         match self {
-            Statement::Apply(_, stmt, _, location) => {
-                if let Statement::Symbol(_, v) = stmt.as_ref()
-                    && (v.as_ref() == name || v.as_ref() == "self")
-                {
-                    *location = CallSite::Tail;
+            Statement::Apply(_, stmt, vals, location) => {
+                //
+                // Check if the application is a candidate for TCO.
+                //
+                let is_candidate = match stmt.as_ref() {
+                    Statement::This(_) => true,
+                    Statement::Symbol(_, v) => v.as_ref() == name,
+                    _ => false,
+                };
+                //
+                // Mark the candidate.
+                //
+                if is_candidate {
+                    match args.arity() {
+                        Arity::All => {
+                            *location = CallSite::Tail;
+                        }
+                        Arity::Some(n) if vals.len() == n as usize => {
+                            *location = CallSite::Tail;
+                        }
+                        Arity::SomeWithRem(n) if vals.len() >= n as usize => {
+                            *location = CallSite::Tail;
+                        }
+                        Arity::None if vals.is_empty() => {
+                            *location = CallSite::Tail;
+                        }
+                        _ => (),
+                    }
                 }
             }
             Statement::IfThenElse(_, _, then, else_) => {
                 //
                 // Process THEN.
                 //
-                then.identify_tail_calls(name);
+                then.identify_tail_calls(name, args);
                 //
                 // Process ELSE.
                 //
                 if let Some(else_) = else_.as_mut() {
-                    else_.identify_tail_calls(name);
+                    else_.identify_tail_calls(name, args);
                 }
             }
-            Statement::Let(_, _, stmts) => stmts.identify_tail_calls(name),
+            Statement::Let(_, _, stmts) => stmts.identify_tail_calls(name, args),
             _ => (),
         }
     }
@@ -965,7 +1001,7 @@ impl Statements {
         self.0.is_empty()
     }
 
-    fn identify_tail_calls(&mut self, name: &str) {
+    fn identify_tail_calls(&mut self, name: &str, args: &Arguments) {
         //
         // Get the last statement.
         //
@@ -975,7 +1011,7 @@ impl Statements {
         //
         // Identify tail calls on the last statement.
         //
-        stmt.identify_tail_calls(name);
+        stmt.identify_tail_calls(name, args);
     }
 
     pub fn is_tail_call(&self) -> bool {
@@ -1294,7 +1330,7 @@ impl FunctionDefinition {
         //
         // Identify tail calls.
         //
-        stmts.identify_tail_calls(name.as_ref());
+        stmts.identify_tail_calls(name.as_ref(), &args);
         //
         // Done.
         //

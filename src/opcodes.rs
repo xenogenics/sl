@@ -181,7 +181,7 @@ pub enum OpCode {
     Dup(usize),
     Get(usize),
     Lst(usize),
-    Pak(usize),
+    Pak(usize, usize),
     Pop(usize),
     Psh(Immediate),
     Rot(usize),

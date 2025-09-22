@@ -4,6 +4,7 @@ use crate::{
     atom::Atom,
     compiler::{Artifacts, CompilerTrait},
     error::Error,
+    vm::RunParameters,
 };
 
 //
@@ -14,11 +15,11 @@ use crate::{
 struct NullCompiler;
 
 impl CompilerTrait for NullCompiler {
-    fn eval(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, Error> {
+    fn eval(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, Error> {
         Err(Error::NotSupported)
     }
 
-    fn expand(self, _: Rc<Atom>, _: usize, _: bool) -> Result<Rc<Atom>, Error> {
+    fn expand(self, _: Rc<Atom>, _: RunParameters) -> Result<Rc<Atom>, Error> {
         Err(Error::NotSupported)
     }
 
@@ -352,7 +353,7 @@ mod compiler {
             context.stream(),
             &[
                 LabelOrOpCode::Funcall("LAMBDA_0000".into()).into(),
-                OpCode::Pak(1).into()
+                OpCode::Pak(0, 1).into()
             ]
         );
         Ok(())
@@ -582,7 +583,7 @@ mod compiler {
                 //
                 OpCode::Rot(2),                                     // [ret0, a]
                 OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))), // [ret0, a, fun0]
-                OpCode::Pak(1),                                     // [ret0, a, pak0]
+                OpCode::Pak(0, 1),                                  // [ret0, a, pak0]
                 OpCode::Psh(Immediate::Number(2)),                  // [ret0, a, pak0, 2]
                 OpCode::Psh(Immediate::Number(1)),                  // [ret0, a, pak0, 2, 1]
                 OpCode::Get(3),                                     // [ret0, a, pak0, 2, 1, pak0]
@@ -619,7 +620,7 @@ mod compiler {
                 OpCode::Get(1),                                  // [ret0, b, a, a]
                 OpCode::Get(3),                                  // [ret0, b, a, a, b]
                 OpCode::Psh(Immediate::Funcall(9, Arity::None)), // [ret0, b, a, a, b, fun0]
-                OpCode::Pak(3),                                  // [ret0, b, a, pak0]
+                OpCode::Pak(0, 3),                               // [ret0, b, a, pak0]
                 OpCode::Call(0),                                 // [ret0, b, a, a+b]
                 OpCode::Rot(3),                                  // [ret0, a+b, b, a]
                 OpCode::Pop(2),                                  // [ret0, a+b]
@@ -640,7 +641,7 @@ mod compiler {
                 OpCode::Rot(2),                                     // [ret0, a]
                 OpCode::Get(1),                                     // [ret0, a, a]
                 OpCode::Psh(Immediate::Funcall(0, Arity::Some(1))), // [ret0, a, a, fun7]
-                OpCode::Pak(2),                                     // [ret0, a, pak0]
+                OpCode::Pak(0, 2),                                  // [ret0, a, pak0]
                 OpCode::Psh(Immediate::Number(1)),                  // [ret0, a, pak0, 1]
                 OpCode::Get(2),                                     // [ret0, a, pak0, 1, pak0]
                 OpCode::Call(1),                                    // [ret0, a, pak0, a+1]
@@ -907,7 +908,7 @@ mod compiler {
                 OpCode::Rot(2),                                     // [ret0, A]
                 OpCode::Psh(Immediate::Number(1)),                  // [ret0, A, 1]
                 OpCode::Psh(Immediate::Funcall(0, Arity::Some(2))), // [ret0, A, 1, +()]
-                OpCode::Call(1),                                    // [ret0, A, cls0]
+                OpCode::Pak(1, 2),                                  // [ret0, A, cls0]
                 OpCode::Get(2),                                     // [ret0, A, cls0, A]
                 OpCode::Get(2),                                     // [ret0, A, cls0, A, cls0]
                 OpCode::Call(1),                                    // [ret0, A, cls0, A+1]

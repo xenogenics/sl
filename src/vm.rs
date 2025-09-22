@@ -8,18 +8,55 @@ use crate::{
     stack::{Stack, Value},
 };
 
+//
+// Parameters.
+//
+
+#[derive(Clone, Copy)]
+pub struct RunParameters {
+    stack_size: usize,
+    trace: bool,
+    depth: usize,
+}
+
+impl RunParameters {
+    pub fn new(stack_size: usize, trace: bool, depth: usize) -> Self {
+        Self {
+            stack_size,
+            trace,
+            depth,
+        }
+    }
+}
+
+impl Default for RunParameters {
+    fn default() -> Self {
+        Self {
+            stack_size: 1024,
+            trace: false,
+            depth: 10,
+        }
+    }
+}
+
+//
+// Virtual machine.
+//
+
 pub struct VirtualMachine {
     entry: String,
     stack: Stack,
     trace: bool,
+    depth: usize,
 }
 
 impl VirtualMachine {
-    pub fn new(entry: &str, capacity: usize, trace: bool) -> Self {
+    pub fn new(entry: &str, params: RunParameters) -> Self {
         Self {
             entry: entry.to_string(),
-            stack: Stack::new(capacity),
-            trace,
+            stack: Stack::new(params.stack_size),
+            trace: params.trace,
+            depth: params.depth,
         }
     }
 
@@ -72,16 +109,15 @@ impl VirtualMachine {
                     println!("{e}:");
                 }
                 //
+                // Format the opcode.
+                //
+                println!("    {pc:04} {:<32} +----", format!("{:?}", ops[pc]));
+                //
                 // Format the stack content.
                 //
-                let mut stack = self.stack.to_string();
-                if stack.len() > 60 {
-                    stack = format!("..{}", &stack[stack.len() - 58..]);
+                for (i, v) in self.stack.iter().rev().take(self.depth).enumerate() {
+                    println!("         {:<32} | {i:>2}: {v}", "");
                 }
-                //
-                // Print the current state.
-                //
-                println!("    {pc:04} {:<32} - {stack}", format!("{:?}", ops[pc]));
             }
             //
             // Execute the opcode.
@@ -483,18 +519,6 @@ impl VirtualMachine {
                         // Decode the funcall.
                         //
                         match self.stack.pop().as_immediate() {
-                            Immediate::Funcall(addr, Arity::All) => {
-                                //
-                                // Collect the arguments into a list.
-                                //
-                                self.stack.list(argcnt);
-                                //
-                                // Push the return link and go to the funcall address.
-                                //
-                                self.stack.push(Value::Link(pc + 1));
-                                pc = addr as usize;
-                                continue;
-                            }
                             Immediate::Extcall(index) => {
                                 //
                                 // Grab the external function definition.
@@ -525,6 +549,23 @@ impl VirtualMachine {
                                     self.stack.drop(argexp as usize);
                                     self.stack.push(result);
                                 }
+                            }
+                            Immediate::Funcall(addr, Arity::None) => {
+                                self.stack.push(Value::Link(pc + 1));
+                                pc = addr as usize;
+                                continue;
+                            }
+                            Immediate::Funcall(addr, Arity::All) => {
+                                //
+                                // Collect the arguments into a list.
+                                //
+                                self.stack.list(argcnt);
+                                //
+                                // Push the return link and go to the funcall address.
+                                //
+                                self.stack.push(Value::Link(pc + 1));
+                                pc = addr as usize;
+                                continue;
                             }
                             Immediate::Funcall(addr, arity @ Arity::Some(argexp)) => {
                                 //
@@ -582,7 +623,9 @@ impl VirtualMachine {
                                     continue;
                                 }
                             }
-                            _ => panic!("Expected an extcall, funcall or syscall"),
+                            _ => {
+                                panic!("Expected an extcall, funcall or syscall");
+                            }
                         }
                     }
                     Value::Immediate(Immediate::Extcall(index)) => {
@@ -704,7 +747,7 @@ impl VirtualMachine {
                 OpCode::Dup(v) => self.stack.dup(v),
                 OpCode::Get(v) => self.stack.get(v),
                 OpCode::Lst(n) => self.stack.list(n),
-                OpCode::Pak(v) => self.stack.pack(0, v),
+                OpCode::Pak(m, n) => self.stack.pack(m, n),
                 OpCode::Pop(v) => self.stack.drop(v),
                 OpCode::Psh(v) => self.stack.push(Value::from(v)),
                 OpCode::Rot(n) => self.stack.rotate(n),

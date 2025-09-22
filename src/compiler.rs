@@ -15,7 +15,7 @@ use crate::{
         Operator, Quote, Statement, Statements, TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
-    vm::VirtualMachine,
+    vm::{RunParameters, VirtualMachine},
 };
 
 //
@@ -26,6 +26,7 @@ use crate::{
 pub(crate) struct Context {
     name: Box<str>,
     arity: Arity,
+    closure: BTreeSet<Box<str>>,
     locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
     stream: Stream,
@@ -36,6 +37,7 @@ impl Context {
         Self {
             name,
             arity,
+            closure: BTreeSet::new(),
             locals: HashMap::default(),
             stackn: 0,
             stream: Stream::default(),
@@ -136,8 +138,8 @@ impl Artifacts {
 //
 
 pub trait CompilerTrait: Clone {
-    fn eval(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
-    fn expand(self, atom: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error>;
+    fn eval(self, atom: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error>;
+    fn expand(self, atom: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error>;
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error>;
     fn compile(self, entrypoint: &str) -> Result<Artifacts, Error>;
 }
@@ -171,7 +173,7 @@ impl Compiler {
 //
 
 impl CompilerTrait for Compiler {
-    fn eval(mut self, expr: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error> {
+    fn eval(mut self, expr: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error> {
         //
         // Define the symbol.
         //
@@ -205,7 +207,7 @@ impl CompilerTrait for Compiler {
         //
         // Build the virtual machine.
         //
-        let mut vm = VirtualMachine::new(&symbol, stack_size, trace);
+        let mut vm = VirtualMachine::new(&symbol, params);
         //
         // Run.
         //
@@ -216,7 +218,7 @@ impl CompilerTrait for Compiler {
         result.try_into()
     }
 
-    fn expand(mut self, expr: Rc<Atom>, stack_size: usize, trace: bool) -> Result<Rc<Atom>, Error> {
+    fn expand(mut self, expr: Rc<Atom>, params: RunParameters) -> Result<Rc<Atom>, Error> {
         //
         // Split the atom.
         //
@@ -250,7 +252,7 @@ impl CompilerTrait for Compiler {
         // Evaluate the macro.
         //
         let expr = Atom::cons(Atom::symbol(name), args);
-        self.eval(expr, stack_size, trace)
+        self.eval(expr, params)
     }
 
     fn load(&mut self, atom: Rc<Atom>) -> Result<(), Error> {
@@ -694,7 +696,46 @@ impl Compiler {
         stmt: &Statement,
     ) -> Result<(), Error> {
         match stmt {
-            Statement::Apply(_, op, args, CallSite::Any) => {
+            Statement::Apply(atom, op, args, CallSite::Any) => {
+                //
+                // Check the arity.
+                //
+                let arity = match op.as_ref() {
+                    Statement::Lambda(_, args, _) => Some(args.arity()),
+                    Statement::Operator(_, op) => Some(Arity::Some(op.argument_count() as u16)),
+                    Statement::Symbol(_, sym) => self.defuns.get(sym).map(|v| v.clone()),
+                    Statement::This(_) => Some(ctxt.arity),
+                    _ => None,
+                };
+                //
+                // In case of a self call, replicate the closure.
+                //
+                if matches!(op.as_ref(), Statement::This(_)) {
+                    //
+                    // Grab the closure symbols.
+                    //
+                    ctxt.closure.iter().try_for_each(|v| {
+                        //
+                        // Get the symbol index.
+                        //
+                        // NOTE(xrg): in this instance it's the first occurence
+                        // that matters.
+                        //
+                        let Some(index) = ctxt.locals.get(v).and_then(|v| v.first()) else {
+                            return Err(Error::InvalidSymbol(v.clone()));
+                        };
+                        //
+                        // Inject the push.
+                        //
+                        let opcode = OpCode::Get(ctxt.stackn - *index).into();
+                        ctxt.stream.push_back(opcode);
+                        ctxt.stackn += 1;
+                        //
+                        // Done.
+                        //
+                        Ok(())
+                    })?;
+                }
                 //
                 // Compile the arguments.
                 //
@@ -704,16 +745,104 @@ impl Compiler {
                 //
                 self.compile_statement(ctxt, op)?;
                 //
-                // If the operator is not internal, generate a call.
+                // Generate a pack or a call.
                 //
-                match op.as_ref() {
-                    Statement::Operator(..) => (),
-                    _ => ctxt.stream.push_back(OpCode::Call(args.len()).into()),
-                }
+                let reduce_len = match (op.as_ref(), arity) {
+                    //
+                    // Raw operator.
+                    //
+                    (Statement::Operator(..), _) => args.len(),
+                    //
+                    // Self operator.
+                    //
+                    (Statement::This(_), Some(arity)) => match arity {
+                        Arity::All => {
+                            let paklen = ctxt.closure.len() + args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        Arity::Some(n) if args.len() <= n as usize => {
+                            let paklen = ctxt.closure.len() + args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        Arity::SomeWithRem(_) => {
+                            let paklen = ctxt.closure.len() + args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        Arity::None if args.is_empty() => {
+                            let paklen = ctxt.closure.len() + args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        _ => return Err(Error::TooManyArguments(atom.span())),
+                    },
+                    (Statement::This(_), None) => {
+                        unreachable!("Arity is known for the self applicator")
+                    }
+                    //
+                    // Applicator with a known arity.
+                    //
+                    (_, Some(arity)) => match arity {
+                        //
+                        // If the function captures everything, just generate a call.
+                        //
+                        Arity::All => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            args.len()
+                        }
+                        //
+                        // Generate a call if the number of arguments is met.
+                        //
+                        Arity::Some(n) if args.len() == n as usize => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            args.len()
+                        }
+                        Arity::SomeWithRem(n) if args.len() >= n as usize => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            args.len()
+                        }
+                        Arity::None if args.is_empty() => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            args.len()
+                        }
+                        //
+                        // Generate a pack if there is not enough arguments.
+                        //
+                        Arity::Some(n) if args.len() < n as usize => {
+                            let paklen = args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        Arity::SomeWithRem(n) if args.len() < n as usize => {
+                            let paklen = args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        //
+                        // Too many arguments.
+                        //
+                        _ => return Err(Error::TooManyArguments(atom.span())),
+                    },
+                    //
+                    // Applicator with unknown arity.
+                    //
+                    _ => {
+                        ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                        args.len()
+                    }
+                };
                 //
                 // Update the stack.
                 //
-                ctxt.stackn -= args.len();
+                ctxt.stackn -= reduce_len;
                 //
                 // Done.
                 //
@@ -723,16 +852,10 @@ impl Compiler {
                 //
                 // Get the symbol of the tail call.
                 //
-                let Statement::Symbol(_, symbol) = op.as_ref() else {
-                    return Err(Error::ExpectedSymbol(Span::None));
-                };
-                //
-                // Check for the self applicator.
-                //
-                let symbol = if symbol.as_ref() == "self" {
-                    ctxt.name.clone()
-                } else {
-                    symbol.clone()
+                let symbol = match op.as_ref() {
+                    Statement::Symbol(_, symbol) => symbol.clone(),
+                    Statement::This(_) => ctxt.name.clone(),
+                    _ => return Err(Error::ExpectedSymbol(Span::None)),
                 };
                 //
                 // Compile the arguments.
@@ -872,7 +995,7 @@ impl Compiler {
                 // Evaluate the macro.
                 //
                 let expr = Atom::cons(Atom::symbol(name), args.atom());
-                let expn = comp.eval(expr, 1024, false)?;
+                let expn = comp.eval(expr, RunParameters::default())?;
                 //
                 // Check if the result is valid.
                 //
@@ -917,6 +1040,10 @@ impl Compiler {
                 //
                 next.track_arguments_and_closure(args, &closure);
                 //
+                // Update the next context's closure.
+                //
+                next.closure.extend(closure);
+                //
                 // Compile the statements.
                 //
                 self.compile_statements(&mut next, statements)?;
@@ -944,7 +1071,7 @@ impl Compiler {
                 //
                 // Grab the closure symbols.
                 //
-                closure.iter().try_for_each(|v| {
+                next.closure.iter().try_for_each(|v| {
                     //
                     // Get the symbol index.
                     //
@@ -978,8 +1105,9 @@ impl Compiler {
                 //
                 // Pack the closure.
                 //
-                ctxt.stream.push_back(OpCode::Pak(closure.len() + 1).into());
-                ctxt.stackn -= closure.len();
+                let opcode = OpCode::Pak(0, next.closure.len() + 1);
+                ctxt.stream.push_back(opcode.into());
+                ctxt.stackn -= next.closure.len();
                 //
                 // Save the block.
                 //
@@ -1154,6 +1282,7 @@ impl Compiler {
             Statement::Backquote(_, quote) => self.compile_backquote(ctxt, quote),
             Statement::Quote(_, quote) => Self::compile_quote(ctxt, quote),
             Statement::Symbol(_, symbol) => self.compile_symbol(ctxt, symbol),
+            Statement::This(_) => self.compile_this(ctxt),
             Statement::Value(_, value) => Self::compile_value(ctxt, value),
         }
     }
@@ -1318,14 +1447,27 @@ impl Compiler {
                 Self::value_opcode(ctxt, value)
             }
             None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
-            None => {
-                if sym.as_ref() == "self" {
-                    LabelOrOpCode::Funcall(ctxt.name.clone())
-                } else {
-                    LabelOrOpCode::Funcall(sym.clone())
-                }
-            }
+            None => LabelOrOpCode::Funcall(sym.clone()),
         };
+        //
+        // Push the opcode.
+        //
+        ctxt.stream.push_back(opcode);
+        //
+        // Update the stack tracker.
+        //
+        ctxt.stackn += 1;
+        //
+        // Done.
+        //
+        Ok(())
+    }
+
+    fn compile_this(&mut self, ctxt: &mut Context) -> Result<(), Error> {
+        //
+        // Define the opcode.
+        //
+        let opcode = LabelOrOpCode::Funcall(ctxt.name.clone());
         //
         // Push the opcode.
         //
@@ -1430,13 +1572,13 @@ impl Compiler {
 
     fn lift(op: Operator) -> TopLevelStatement {
         let opname = op.to_string();
-        let argcnt = op.arity();
+        let argcnt = op.argument_count();
         let macros = BTreeSet::default();
         //
         // Build the argument list.
         //
         let args = (0..argcnt).rev().fold(Atom::nil(), |acc, v| {
-            let name = format!("_{v}");
+            let name = format!("#{v}");
             let symb = Atom::symbol(name.as_str());
             Atom::cons(symb, acc)
         });
