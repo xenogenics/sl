@@ -40,12 +40,6 @@ pub Lists: Vec<Rc<Atom>> = {
 }
 
 pub Expression: Rc<Atom> = {
-	<start:@L> "~" <e:Atom> <end:@R> =>? {
-		let comp = compiler.clone();
-		let params = RunParameters::default();
-		let rslt = comp.eval(e, params).map_err(|error| ParseError::User { error })?;
-		Ok(rslt.with_span(Span::Offset(start, end)))
-	},
 	<start:@L> "'"  <e:Atom> <end:@R> => {
 		Atom::cons(Atom::symbol("quote"), e).with_span(Span::Offset(start, end))
 	},
@@ -64,6 +58,18 @@ pub Expression: Rc<Atom> = {
 }
 
 Expressions: Rc<Atom> = {
+	<start:@L> "~" <e:Expression> <end:@R> =>? {
+		let comp = compiler.clone();
+		let params = RunParameters::default();
+		let rslt = comp.eval(e, params).map_err(|error| ParseError::User { error })?;
+		Ok(rslt.with_span(Span::Offset(start, end)))
+	},
+	<start:@L> "~" <e:Expression> <v:Expressions> <end:@R> =>? {
+		let comp = compiler.clone();
+		let params = RunParameters::default();
+		let rslt = comp.eval(e, params).map_err(|error| ParseError::User { error })?;
+		Ok(Atom::conc(rslt, v).with_span(Span::Offset(start, end)))
+	},
 	<start:@L> <e:Expression> <end:@R> => {
 		Atom::cons(e, Atom::nil()).with_span(Span::Offset(start, end))
 	},

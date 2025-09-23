@@ -152,7 +152,7 @@ pub trait CompilerTrait: Clone {
 
 #[derive(Clone, Default)]
 pub struct Compiler {
-    consts: BTreeMap<Box<str>, Value>,
+    consts: BTreeMap<Box<str>, Quote>,
     blocks: BTreeMap<Box<str>, Context>,
     defuns: BTreeMap<Box<str>, Arity>,
     macros: BTreeSet<Box<str>>,
@@ -1462,7 +1462,7 @@ impl Compiler {
             Some(index) => OpCode::Get(ctxt.stackn - *index).into(),
             None if self.consts.contains_key(sym) => {
                 let value = self.consts.get(sym).unwrap();
-                Self::value_opcode(ctxt, value)
+                return Self::compile_quote(ctxt, value);
             }
             None if self.exfuns.contains_key(sym) => LabelOrOpCode::Extcall(sym.clone()),
             None => LabelOrOpCode::Funcall(sym.clone()),

@@ -1,4 +1,31 @@
-(use '(iterators rev) '(lang |> cond unless))
+(use
+  '(iterators foldl foldr repeat rev take)
+  '(lang |> cond unless)
+  '(utils len))
+
+;
+; Concatenation.
+;
+
+(def append (x . @)
+  "Concatenate multiple string."
+  (str
+    (foldl
+      (\ (acc0 e0)
+        (foldr
+          (\ (e1 acc1) (cons e1 acc1))
+          acc0 (split e0)
+      ))
+      (split x) @
+  )))
+
+(def $+ (x y)
+  "Concatenate two strings."
+  (append x y))
+
+;
+; Formatting.
+; 
 
 (def >chars (expr)
   "Convert EXPR into its list of characters representation."
@@ -33,3 +60,23 @@
 (def >str (expr)
   "Convert EXPR into a string."
   (str (>chars expr)))
+
+;
+; Padding.
+;
+
+(def <+ (wlen strn)
+  "Left-pad STRN by WLEN spaces."
+  (let ((chars . (split strn))
+        (delta . (- wlen (len chars)))) 
+    (if (>= delta 0)
+      ($+ strn (str (repeat delta ^\s)))
+      (str (take wlen chars)))))
+      
+(def +> (wlen strn)
+  "Right-pad STRN by WLEN spaces."
+  (let ((chars . (split strn))
+        (delta . (- wlen (len chars)))) 
+    (if (>= delta 0)
+      ($+ (str (repeat delta ^\s)) strn)
+      (str (rev (take wlen (rev chars)))))))

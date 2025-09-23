@@ -1,5 +1,3 @@
-(use '(utils len))
-
 ;
 ; Flags.
 ; 
@@ -56,19 +54,3 @@
                 (len . integer))
   "Attempt to write LEN from FD into BUF."
   integer)
-
-;
-; Print.
-;
-
-(def print (value)
-  "Write string VALUE to STDOUT."
-  (let ((chars  . (split value))
-        (length . (len chars))
-        (bytes  . (bytes chars)))
-    (write STDOUT bytes length)))
-
-(def println (value)
-  "Write string VALUE and a newline to STDOUT."
-  (print value)
-  (print "\n"))

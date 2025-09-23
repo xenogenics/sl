@@ -1343,10 +1343,10 @@ impl FunctionDefinition {
 //
 
 #[derive(Debug)]
-pub struct ConstantDefinition(Box<str>, Value);
+pub struct ConstantDefinition(Box<str>, Quote);
 
 impl ConstantDefinition {
-    pub fn new(name: Box<str>, value: Value) -> Self {
+    pub fn new(name: Box<str>, value: Quote) -> Self {
         Self(name, value)
     }
 
@@ -1354,7 +1354,7 @@ impl ConstantDefinition {
         &self.0
     }
 
-    pub fn value(&self) -> &Value {
+    pub fn value(&self) -> &Quote {
         &self.1
     }
 
@@ -1386,7 +1386,7 @@ impl ConstantDefinition {
         //
         // Build the value.
         //
-        let value = Value::try_from(value.clone())?;
+        let value = Quote::try_from(value.clone())?;
         //
         // Done.
         //

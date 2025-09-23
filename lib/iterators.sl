@@ -36,6 +36,11 @@
 			(fun (car lst1) (car lst2))
 			(map2 fun (cdr lst1) (cdr lst2)))))
 
+(def repeat (n atom)
+	"Create a list of N identical ATOM."
+	(if (> n 0)
+		(cons atom (repeat (- n 1) atom))))
+
 (def rev (lst)
 	"Reverse the elements in LST."
 	(foldl (\ (acc e) (cons e acc)) nil lst))
