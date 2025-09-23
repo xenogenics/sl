@@ -56,6 +56,7 @@ impl TryFrom<(ExternalType, &stack::Value)> for Value {
 // Stub.
 //
 
+#[derive(Debug)]
 pub struct Stub {
     args: Vec<ExternalType>,
     #[allow(dead_code)]
@@ -74,7 +75,6 @@ impl Stub {
         //
         // Convert the argument to FFI values.
         //
-
         let mut values: Vec<_> = self
             .args
             .iter()

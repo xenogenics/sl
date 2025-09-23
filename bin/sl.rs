@@ -17,7 +17,7 @@ struct Arguments {
     stack_size: usize,
     #[arg(long)]
     trace: bool,
-    #[arg(long)]
+    #[arg(long, default_value_t = 10)]
     depth: usize,
 }
 

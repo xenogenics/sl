@@ -1,3 +1,5 @@
+(use '(utils len))
+
 ;
 ; Flags.
 ; 
@@ -16,6 +18,14 @@
 (val CREATE       x0200)
 (val TRUNCATE     x0400)
 (val EXCLUSIVE    x0800)
+
+;
+; Common streams.
+;
+
+(val STDIN  0)
+(val STDOUT 1)
+(val STDERR 2)
 
 ;
 ; Open and close.
@@ -46,3 +56,19 @@
                 (len . integer))
   "Attempt to write LEN from FD into BUF."
   integer)
+
+;
+; Print.
+;
+
+(def print (value)
+  "Write string VALUE to STDOUT."
+  (let ((chars  . (split value))
+        (length . (len chars))
+        (bytes  . (bytes chars)))
+    (write STDOUT bytes length)))
+
+(def println (value)
+  "Write string VALUE and a newline to STDOUT."
+  (print value)
+  (print "\n"))
