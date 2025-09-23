@@ -26,6 +26,7 @@ use crate::{
 pub(crate) struct Context {
     name: Box<str>,
     arity: Arity,
+    lambda: bool,
     closure: BTreeSet<Box<str>>,
     locals: HashMap<Box<str>, Vec<usize>>,
     stackn: usize,
@@ -33,10 +34,11 @@ pub(crate) struct Context {
 }
 
 impl Context {
-    fn new(name: Box<str>, arity: Arity) -> Self {
+    fn new(name: Box<str>, arity: Arity, lambda: bool) -> Self {
         Self {
             name,
             arity,
+            lambda,
             closure: BTreeSet::new(),
             locals: HashMap::default(),
             stackn: 0,
@@ -569,7 +571,7 @@ impl Compiler {
     fn compile_function(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let arity = defun.arguments().arity();
         let argcnt = defun.arguments().len();
-        let mut ctxt = Context::new(defun.name().clone(), arity);
+        let mut ctxt = Context::new(defun.name().clone(), arity, false);
         //
         // Track the function arguments.
         //
@@ -710,7 +712,7 @@ impl Compiler {
                 //
                 // In case of a self call, replicate the closure.
                 //
-                if matches!(op.as_ref(), Statement::This(_)) {
+                if matches!(op.as_ref(), Statement::This(_)) && ctxt.lambda {
                     //
                     // Grab the closure symbols.
                     //
@@ -753,28 +755,41 @@ impl Compiler {
                     //
                     (Statement::Operator(..), _) => args.len(),
                     //
-                    // Self operator.
+                    // Self operator within a lambda.
                     //
-                    (Statement::This(_), Some(arity)) => match arity {
+                    (Statement::This(_), Some(arity)) if ctxt.lambda => match arity {
+                        //
+                        // If the function capture everything, generate a call.
+                        //
                         Arity::All => {
-                            let paklen = ctxt.closure.len() + args.len() + 1;
-                            let opcode = OpCode::Pak(args.len(), paklen);
-                            ctxt.stream.push_back(opcode.into());
-                            paklen - 1
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            ctxt.closure.len() + args.len()
                         }
-                        Arity::Some(n) if args.len() <= n as usize => {
-                            let paklen = ctxt.closure.len() + args.len() + 1;
-                            let opcode = OpCode::Pak(args.len(), paklen);
-                            ctxt.stream.push_back(opcode.into());
-                            paklen - 1
+                        //
+                        // Generate a call if the number of arguments is met.
+                        //
+                        Arity::Some(n) if args.len() == n as usize => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            ctxt.closure.len() + args.len()
                         }
-                        Arity::SomeWithRem(_) => {
-                            let paklen = ctxt.closure.len() + args.len() + 1;
-                            let opcode = OpCode::Pak(args.len(), paklen);
-                            ctxt.stream.push_back(opcode.into());
-                            paklen - 1
+                        Arity::SomeWithRem(n) if args.len() >= n as usize => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            ctxt.closure.len() + args.len()
                         }
                         Arity::None if args.is_empty() => {
+                            ctxt.stream.push_back(OpCode::Call(args.len()).into());
+                            ctxt.closure.len() + args.len()
+                        }
+                        //
+                        // Generate a pack if there is not enough arguments.
+                        //
+                        Arity::Some(n) if args.len() < n as usize => {
+                            let paklen = ctxt.closure.len() + args.len() + 1;
+                            let opcode = OpCode::Pak(args.len(), paklen);
+                            ctxt.stream.push_back(opcode.into());
+                            paklen - 1
+                        }
+                        Arity::SomeWithRem(n) if args.len() < n as usize => {
                             let paklen = ctxt.closure.len() + args.len() + 1;
                             let opcode = OpCode::Pak(args.len(), paklen);
                             ctxt.stream.push_back(opcode.into());
@@ -782,11 +797,14 @@ impl Compiler {
                         }
                         _ => return Err(Error::TooManyArguments(atom.span())),
                     },
+                    //
+                    // Self operator without arity (unreachable).
+                    //
                     (Statement::This(_), None) => {
                         unreachable!("Arity is known for the self applicator")
                     }
                     //
-                    // Applicator with a known arity.
+                    // Any applicator with a known arity.
                     //
                     (_, Some(arity)) => match arity {
                         //
@@ -832,7 +850,7 @@ impl Compiler {
                         _ => return Err(Error::TooManyArguments(atom.span())),
                     },
                     //
-                    // Applicator with unknown arity.
+                    // Any applicator with unknown arity.
                     //
                     _ => {
                         ctxt.stream.push_back(OpCode::Call(args.len()).into());
@@ -1016,7 +1034,7 @@ impl Compiler {
                 //
                 // Build the next context.
                 //
-                let mut next = Context::new(name.clone(), args.arity());
+                let mut next = Context::new(name.clone(), args.arity(), true);
                 //
                 // Grab the closure.
                 //

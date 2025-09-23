@@ -79,8 +79,8 @@ impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Bytes(_) => write!(f, "#<bytes>"),
-            Value::Closure(_) => write!(f, "#<closure>"),
-            Value::Immediate(value) => write!(f, "{value}"),
+            Value::Closure(v) => write!(f, "{v}"),
+            Value::Immediate(v) => write!(f, "{v}"),
             Value::Pair(..) => {
                 write!(f, "(")?;
                 self.fmt_pair(f)?;

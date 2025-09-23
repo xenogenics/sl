@@ -71,10 +71,10 @@ impl Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Closure(value) => write!(f, "#{value}"),
-            Value::Heap(value) => write!(f, "{value}"),
-            Value::Immediate(value) => write!(f, "{value}"),
-            Value::Link(_) => write!(f, "#L"),
+            Value::Closure(v) => write!(f, "#{v}"),
+            Value::Heap(v) => write!(f, "{v}"),
+            Value::Immediate(v) => write!(f, "{v}"),
+            Value::Link(v) => write!(f, "#L({v})"),
         }
     }
 }
