@@ -1,11 +1,8 @@
 use std::{io::Read, rc::Rc, str::FromStr};
 
 use clap::{Parser, arg};
-use lalrpop_util::ParseError;
-use rustyline::{
-    Completer, Editor, Helper, Highlighter, Hinter,
-    error::ReadlineError,
-    validate::{ValidationContext, ValidationResult, Validator},
+use reedline::{
+    DefaultPrompt, FileBackedHistory, Reedline, ReedlineError, Signal, ValidationResult, Validator,
 };
 use sl::{
     atom::Atom,
@@ -46,7 +43,7 @@ enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
     #[error("Readline error: {0}")]
-    Readline(#[from] ReadlineError),
+    Reedline(#[from] ReedlineError),
 }
 
 //
@@ -151,23 +148,18 @@ impl CompilerTrait for NullCompiler {
 // Input validator.
 //
 
-#[derive(Completer, Helper, Highlighter, Hinter)]
 struct InputValidator;
 
 impl Validator for InputValidator {
-    fn validate(&self, ctx: &mut ValidationContext) -> rustyline::Result<ValidationResult> {
-        use ValidationResult::{Incomplete, Invalid, Valid};
-        //
-        // Grab the input.
-        //
-        let input = ctx.input().trim();
+    fn validate(&self, input: &str) -> ValidationResult {
+        use ValidationResult::{Complete, Incomplete};
         //
         // Check if it's a command.
         //
         if input.as_bytes()[0] == b'.' {
             match Command::from_str(input) {
-                Ok(_) => return Ok(Valid(None)),
-                Err(_) => return Ok(Invalid(Some(" --< invalid command".to_string()))),
+                Ok(_) => return Complete,
+                Err(_) => return Incomplete,
             }
         }
         //
@@ -179,19 +171,8 @@ impl Validator for InputValidator {
         // Try to parse it.
         //
         match parser.parse(&mut compiler, input) {
-            Ok(_) => Ok(Valid(None)),
-            Err(ParseError::InvalidToken { location }) => {
-                let error = format!(" --< invalid token at {location}");
-                Ok(Invalid(Some(error)))
-            }
-            Err(ParseError::UnrecognizedEof { .. }) => Ok(Incomplete),
-            Err(ParseError::UnrecognizedToken {
-                token: (start, token, end),
-                expected: _,
-            }) => Ok(Invalid(Some(format!(
-                " --< unexpected token '{token}' at [{start}..{end}]"
-            )))),
-            Err(e) => Ok(Invalid(Some(e.to_string()))),
+            Ok(_) => Complete,
+            Err(_) => Incomplete,
         }
     }
 }
@@ -325,14 +306,17 @@ fn main() -> Result<(), Error> {
     //
     // Create the line editor.
     //
-    let mut rl = Editor::new()?;
-    rl.set_helper(Some(InputValidator));
+    let rl = Reedline::create().with_validator(Box::new(InputValidator));
+    let prompt = DefaultPrompt::default();
     //
     // Load the history file.
     //
-    if let Some(file) = args.history_file.as_deref() {
-        rl.load_history(file).unwrap_or_default();
-    }
+    let mut rl = if let Some(file) = args.history_file.as_deref() {
+        let history = FileBackedHistory::with_file(1000, file.into())?;
+        rl.with_history(Box::new(history))
+    } else {
+        rl
+    };
     //
     // Create the parser.
     //
@@ -367,16 +351,12 @@ fn main() -> Result<(), Error> {
         //
         // Read the line.
         //
-        let readline = rl.readline("> ");
+        let readline = rl.read_line(&prompt);
         //
         // Process the line.
         //
         match readline {
-            Ok(line) => {
-                //
-                // Update the history.
-                //
-                rl.add_history_entry(line.as_str())?;
+            Ok(Signal::Success(line)) => {
                 //
                 // Check if it's an internal command.
                 //
@@ -438,11 +418,11 @@ fn main() -> Result<(), Error> {
                     Err(error) => println!("! {error}"),
                 }
             }
-            Err(ReadlineError::Interrupted) => {
+            Ok(Signal::CtrlC) => {
                 println!("CTRL-C");
                 break;
             }
-            Err(ReadlineError::Eof) => {
+            Ok(Signal::CtrlD) => {
                 println!("CTRL-D");
                 break;
             }
@@ -451,12 +431,6 @@ fn main() -> Result<(), Error> {
                 break;
             }
         }
-    }
-    //
-    // Save the history file.
-    //
-    if let Some(file) = args.history_file.as_deref() {
-        rl.save_history(file).unwrap_or_default();
     }
     //
     // Done.

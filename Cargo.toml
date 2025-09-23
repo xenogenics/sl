@@ -37,7 +37,7 @@ env_logger = "0.11"
 lalrpop-util = { version = "0.20", features = ["lexer"] }
 libc = "0.2"
 libffi = "4.1"
-rustyline = { version = "17.0", features = ["derive"] }
+reedline = "0.42"
 strum = "0.26"
 strum_macros = "0.26"
 thiserror = "2.0"
