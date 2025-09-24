@@ -1,7 +1,7 @@
 (use
   '(iterators foldl foldr repeat rev take)
   '(lang |> cond unless)
-  '(utils len))
+  '(list len))
 
 ;
 ; Concatenation.
@@ -22,6 +22,24 @@
 (def $+ (x y)
   "Concatenate two strings."
   (append x y))
+
+;
+; Comparison.
+;
+
+(def $< (stra strb)
+  "Strict less operator."
+  (let ((cmp . (\(ba bb)
+                 (and (not (nil? bb)) (or
+                   (nil? ba)
+                   (let ((a . (car ba))
+                         (b . (car bb)))
+                     (or (< a b) (and
+                       (= a b)
+                       (self (cdr ba) (cdr bb))))
+                    ))))))
+    (cmp (split stra) (split strb))
+  ))
 
 ;
 ; Formatting.

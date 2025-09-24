@@ -1,3 +1,9 @@
+(def filter (fun lst)
+	"Filter out element of LST that match FUN."
+	(foldr
+		(\ (e acc) (if (fun e) acc (cons e acc)))
+		lst nil))
+
 (def foldl (fun acc lst)
 	"Left-fold FUN over LST with ACC as the default accumulator value."
 	(if (lst? lst)

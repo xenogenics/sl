@@ -59,6 +59,7 @@ impl Immediate {
 
     pub const fn as_number(&self) -> i64 {
         match self {
+            Immediate::Char(v) => *v as i64,
             Immediate::Number(v) => *v,
             _ => panic!("Expected a number"),
         }

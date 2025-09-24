@@ -157,7 +157,11 @@ impl VirtualMachine {
                 for (i, v) in stack.into_iter().enumerate() {
                     if i == 0 {
                         let op = format!("{}", ops[ppc]);
-                        println!("    {ppc:04} {op:<16} ┌ {i:>2}: {v}");
+                        if depth == 1 {
+                            println!("    {ppc:04} {op:<16} - {i:>2}: {v}");
+                        } else {
+                            println!("    {ppc:04} {op:<16} ┌ {i:>2}: {v}");
+                        }
                     } else if i == depth - 1 {
                         println!("    .    {:<16} └ {i:>2}: {v}", "");
                     } else {

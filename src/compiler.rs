@@ -1552,6 +1552,9 @@ impl Compiler {
             //
             Self::lift(Operator::Add),
             Self::lift(Operator::Sub),
+            Self::lift(Operator::Mul),
+            Self::lift(Operator::Div),
+            Self::lift(Operator::Mod),
             Self::lift(Operator::Ge),
             Self::lift(Operator::Gt),
             Self::lift(Operator::Le),
@@ -1565,6 +1568,13 @@ impl Compiler {
             Self::lift(Operator::Not),
             Self::lift(Operator::Or),
             //
+            // Bits.
+            //
+            Self::lift(Operator::BitAnd),
+            Self::lift(Operator::BitNot),
+            Self::lift(Operator::BitOr),
+            Self::lift(Operator::BitXor),
+            //
             // List.
             //
             Self::lift(Operator::Car),
@@ -1572,12 +1582,22 @@ impl Compiler {
             Self::lift(Operator::Conc),
             Self::lift(Operator::Cons),
             //
+            // Bytes, string, and symbol operations.
+            //
+            Self::lift(Operator::Bytes),
+            Self::lift(Operator::Chr),
+            Self::lift(Operator::Split),
+            Self::lift(Operator::Str),
+            Self::lift(Operator::Sym),
+            //
             // Predicates.
             //
+            Self::lift(Operator::IsByt),
             Self::lift(Operator::IsChr),
             Self::lift(Operator::IsNum),
             Self::lift(Operator::IsLst),
             Self::lift(Operator::IsNil),
+            Self::lift(Operator::IsStr),
             Self::lift(Operator::IsSym),
             Self::lift(Operator::IsTru),
             Self::lift(Operator::IsWld),

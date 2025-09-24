@@ -813,6 +813,77 @@ impl Statement {
                 // Other symbols.
                 //
                 v => match Operator::from_str(v) {
+                    Ok(Operator::Or) => {
+                        //
+                        // Process the arguments.
+                        //
+                        let args = Statements::from_atom(rem.clone(), macros)?;
+                        //
+                        // Check the number of arguments.
+                        //
+                        if args.len() > 2 {
+                            return Err(Error::TooManyArguments(atom.span()));
+                        }
+                        //
+                        // If there is enough arguments, generate the call.
+                        //
+                        if args.len() == 2 {
+                            //
+                            // Check if the second argument requires some kind
+                            // of complex evaluation.
+                            //
+                            let short_circuit = match args.0[1] {
+                                Statement::Apply(..)
+                                | Statement::Expand(..)
+                                | Statement::Lambda(..)
+                                | Statement::IfThenElse(..)
+                                | Statement::Let(..)
+                                | Statement::Prog(..) => true,
+                                Statement::Operator(..)
+                                | Statement::Backquote(..)
+                                | Statement::Quote(..)
+                                | Statement::Symbol(..)
+                                | Statement::This(_)
+                                | Statement::Value(..) => false,
+                            };
+                            //
+                            // If so, generate a short circuit.
+                            //
+                            if short_circuit {
+                                //
+                                // Build the atom.
+                                //
+                                let atom = Atom::cons(
+                                    Atom::symbol("if"),
+                                    Atom::cons(
+                                        args.0[0].atom(),
+                                        Atom::cons(
+                                            Atom::t(),
+                                            Atom::cons(args.0[1].atom(), Atom::nil()),
+                                        ),
+                                    ),
+                                );
+                                //
+                                // Parse the expression.
+                                //
+                                Statement::from_atom(atom, macros)
+                            }
+                            //
+                            // Otherwise, generate the operator call.
+                            //
+                            else {
+                                let stmt = Statement::Operator(Atom::symbol(v), Operator::Or);
+                                Ok(Self::Apply(atom, stmt.into(), args, CallSite::Any))
+                            }
+                        }
+                        //
+                        // Otherwise, generate a symbol application.
+                        //
+                        else {
+                            let stmt = Statement::Symbol(sym.clone(), name.clone());
+                            Ok(Self::Apply(atom, stmt.into(), args, CallSite::Any))
+                        }
+                    }
                     Ok(op) => {
                         //
                         // Process the arguments.

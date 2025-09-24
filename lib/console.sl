@@ -1,8 +1,8 @@
 (use
   '(io STDOUT write)
-  '(iterators foldr)
+  '(iterators foldr iter)
   '(lang |> match)
-  '(utils len))
+  '(list len))
 
 ;
 ; String escape.
@@ -63,14 +63,23 @@
 ; Print.
 ;
 
-(def print (value)
+(def prin1 (value)
   "Write string VALUE to STDOUT."
   (let ((chars  . (split value))
         (length . (len chars))
         (bytes  . (bytes chars)))
     (write STDOUT bytes length)))
 
-(def println (value)
+(def print @
+  "Write all arguments to STDOUT."
+  (iter prin1 @))
+
+(def prin1ln (value)
   "Write string VALUE and a newline to STDOUT."
-  (print value)
-  (print "\n"))
+  (prin1 value)
+  (prin1 "\n"))
+
+(def println @
+  "Write string VALUE and a newline to STDOUT."
+  (iter prin1 @)
+  (prin1 "\n"))
