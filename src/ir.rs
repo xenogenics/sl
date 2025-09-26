@@ -273,12 +273,12 @@ pub enum Operator {
     Bytes,
     #[strum(serialize = "chr")]
     Chr,
-    #[strum(serialize = "split")]
-    Split,
     #[strum(serialize = "str")]
     Str,
     #[strum(serialize = "sym")]
     Sym,
+    #[strum(serialize = "unpack")]
+    Unpack,
     //
     // Predicates.
     //
@@ -331,7 +331,7 @@ impl Operator {
             Operator::Chr => 1,
             Operator::Str => 1,
             Operator::Sym => 1,
-            Operator::Split => 1,
+            Operator::Unpack => 1,
             Operator::IsByt => 1,
             Operator::IsChr => 1,
             Operator::IsNum => 1,

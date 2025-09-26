@@ -417,7 +417,7 @@ impl VirtualMachine {
                 };
                 self.stack.push(value);
             }
-            OpCode::Split => {
+            OpCode::Unpack => {
                 let value = match self.stack.pop() {
                     Value::Heap(v) => match v.as_ref() {
                         heap::Value::Bytes(v) => {

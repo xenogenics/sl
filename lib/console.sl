@@ -38,11 +38,11 @@
 (def esc (code value)
   "Escape the string VALUE with CODE."
   (|>
-    (split "[0m")
+    (unpack "[0m")
     (cons (chr 27))
-    (conc (split value))
+    (conc (unpack value))
     (cons ^m)
-    (conc (split code))
+    (conc (unpack code))
     (cons ^[)
     (cons (chr 27))
     str))
@@ -65,7 +65,7 @@
 
 (def prin1 (value)
   "Write string VALUE to STDOUT."
-  (let ((chars  . (split value))
+  (let ((chars  . (unpack value))
         (length . (len chars))
         (bytes  . (bytes chars)))
     (write STDOUT bytes length)))

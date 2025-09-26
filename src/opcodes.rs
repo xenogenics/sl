@@ -154,9 +154,9 @@ pub enum OpCode {
     //
     Bytes,
     Chr,
-    Split,
     Str,
     Sym,
+    Unpack,
     //
     // Predicates.
     //
@@ -217,7 +217,7 @@ impl std::fmt::Display for OpCode {
             OpCode::Cons => write!(f, "Cons"),
             OpCode::Bytes => write!(f, "Bytes"),
             OpCode::Chr => write!(f, "Chr"),
-            OpCode::Split => write!(f, "Split"),
+            OpCode::Unpack => write!(f, "Split"),
             OpCode::Str => write!(f, "Str"),
             OpCode::Sym => write!(f, "Sym"),
             OpCode::IsByt => write!(f, "IsByt"),

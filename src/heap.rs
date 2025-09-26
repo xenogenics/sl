@@ -105,9 +105,11 @@ impl PartialEq for Value {
             //
             // Handle member equality.
             //
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Closure(a), Value::Closure(b)) => a == b,
             (Value::Immediate(a), Value::Immediate(b)) => a == b,
             (Value::Pair(car0, cdr0), Value::Pair(car1, cdr1)) => car0 == car1 && cdr0 == cdr1,
+            (Value::String(a), Value::String(b)) => a == b,
             //
             // Default.
             //

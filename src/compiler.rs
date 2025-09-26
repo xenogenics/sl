@@ -1181,7 +1181,7 @@ impl Compiler {
                     Operator::Chr => OpCode::Chr.into(),
                     Operator::Str => OpCode::Str.into(),
                     Operator::Sym => OpCode::Sym.into(),
-                    Operator::Split => OpCode::Split.into(),
+                    Operator::Unpack => OpCode::Unpack.into(),
                     //
                     // Predicates.
                     //
@@ -1586,7 +1586,7 @@ impl Compiler {
             //
             Self::lift(Operator::Bytes),
             Self::lift(Operator::Chr),
-            Self::lift(Operator::Split),
+            Self::lift(Operator::Unpack),
             Self::lift(Operator::Str),
             Self::lift(Operator::Sym),
             //

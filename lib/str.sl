@@ -1,7 +1,7 @@
 (use
   '(iterators foldl foldr repeat rev take)
   '(lang |> cond unless)
-  '(list len))
+  '(list len split))
 
 ;
 ; Concatenation.
@@ -14,14 +14,28 @@
       (\ (acc0 e0)
         (foldr
           (\ (e1 acc1) (cons e1 acc1))
-          acc0 (split e0)
+          acc0 (unpack e0)
       ))
-      (split x) @
+      (unpack x) @
   )))
 
 (def $+ (x y)
   "Concatenate two strings."
   (append x y))
+
+;
+; Splitting.
+;
+
+(def $/ (c value)
+  "Split string VALUE at character C."
+  (|>
+    value
+    unpack
+    (split (\ (e) (= e c)))
+    (foldl (\ (acc e) (cons (str e) acc)) nil)
+    rev
+  ))
 
 ;
 ; Comparison.
@@ -38,7 +52,7 @@
                        (= a b)
                        (self (cdr ba) (cdr bb))))
                     ))))))
-    (cmp (split stra) (split strb))
+    (cmp (unpack stra) (unpack strb))
   ))
 
 ;
@@ -70,8 +84,8 @@
                               )))
                 (|> it digits rev)
               )))
-    (str? . (split it))
-    (sym? . (split it))
+    (str? . (unpack it))
+    (sym? . (unpack it))
     (tru? . (cons ^T nil))
 ))
 
@@ -85,7 +99,7 @@
 
 (def <+ (wlen strn)
   "Left-pad STRN by WLEN spaces."
-  (let ((chars . (split strn))
+  (let ((chars . (unpack strn))
         (delta . (- wlen (len chars)))) 
     (if (>= delta 0)
       ($+ strn (str (repeat delta ^\s)))
@@ -93,7 +107,7 @@
       
 (def +> (wlen strn)
   "Right-pad STRN by WLEN spaces."
-  (let ((chars . (split strn))
+  (let ((chars . (unpack strn))
         (delta . (- wlen (len chars)))) 
     (if (>= delta 0)
       ($+ (str (repeat delta ^\s)) strn)
