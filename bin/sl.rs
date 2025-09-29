@@ -19,6 +19,8 @@ struct Arguments {
     trace: bool,
     #[arg(long, default_value_t = 10)]
     depth: usize,
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    others: Vec<String>,
 }
 
 impl Into<RunParameters> for Arguments {
@@ -67,10 +69,26 @@ fn main() -> Result<(), Error> {
     //
     let artifacts = compiler.compile("main")?;
     //
+    // Convert the unprocessed arguments to an atom.
+    //
+    let argv = args
+        .others
+        .iter()
+        .rev()
+        .fold(Atom::nil(), |acc, e| Atom::cons(Atom::string(e), acc));
+    //
+    // Prepend the file name and push them to the VM.
+    //
+    let argv = Atom::cons(Atom::string(&args.file), argv);
+    //
     // Build the virtual machine.
     //
     let params: RunParameters = args.into();
     let mut vm = VirtualMachine::new("main", params);
+    //
+    // Push the CLI arguments.
+    //
+    vm.push(argv.try_into()?);
     //
     // Run the binary.
     //

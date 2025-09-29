@@ -1,6 +1,6 @@
 use std::{ffi::CString, rc::Rc};
 
-use crate::{opcodes::Immediate, stack};
+use crate::{atom::Atom, error::Error, opcodes::Immediate, stack};
 
 //
 // Value.
@@ -42,6 +42,10 @@ impl Value {
             }
             _ => std::ptr::null_mut(),
         }
+    }
+
+    pub fn is_pair(&self) -> bool {
+        matches!(self, Self::Pair(..))
     }
 
     pub fn iter(&self) -> ValueIterator {
@@ -90,6 +94,26 @@ impl std::fmt::Display for Value {
                 let val = value.as_c_str().to_string_lossy();
                 write!(f, "\"{val}\"")
             }
+        }
+    }
+}
+
+impl TryFrom<Rc<Atom>> for Value {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            Atom::Pair(_, car, cdr) => {
+                let car: Self = car.clone().try_into()?;
+                let cdr: Self = cdr.clone().try_into()?;
+                Ok(Self::Pair(Rc::new(car), Rc::new(cdr)))
+            }
+            Atom::String(_, v) => {
+                let bytes = v.as_bytes().to_vec();
+                let val = unsafe { CString::from_vec_unchecked(bytes) };
+                Ok(Self::String(val))
+            }
+            _ => Immediate::try_from(value).map(Self::Immediate),
         }
     }
 }

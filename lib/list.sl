@@ -131,7 +131,9 @@
                               lst
                               nil
                             )))
-    (cons stack result)
+    (if stack
+      (cons stack result)
+      result)
   ))
   
 (def sort (cmp lst)

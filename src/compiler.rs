@@ -5,6 +5,7 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
+use strum::IntoEnumIterator;
 
 use crate::{
     atom::{Atom, Span},
@@ -1266,6 +1267,10 @@ impl Compiler {
                 //
                 let opcode = match v {
                     //
+                    // Function application.
+                    //
+                    Operator::Apply => OpCode::Apply.into(),
+                    //
                     // Arithmetics.
                     //
                     Operator::Add => OpCode::Add.into(),
@@ -1667,69 +1672,9 @@ impl Compiler {
 
 impl Compiler {
     pub fn lift_operators(&mut self) -> Result<(), Error> {
-        //
-        // Define the top-level statements for the operators.
-        //
-        let stmts = vec![
-            //
-            // Arithmetics.
-            //
-            Self::lift(Operator::Add),
-            Self::lift(Operator::Sub),
-            Self::lift(Operator::Mul),
-            Self::lift(Operator::Div),
-            Self::lift(Operator::Mod),
-            Self::lift(Operator::Ge),
-            Self::lift(Operator::Gt),
-            Self::lift(Operator::Le),
-            Self::lift(Operator::Lt),
-            //
-            // Logic.
-            //
-            Self::lift(Operator::And),
-            Self::lift(Operator::Equ),
-            Self::lift(Operator::Neq),
-            Self::lift(Operator::Not),
-            Self::lift(Operator::Or),
-            //
-            // Bits.
-            //
-            Self::lift(Operator::BitAnd),
-            Self::lift(Operator::BitNot),
-            Self::lift(Operator::BitOr),
-            Self::lift(Operator::BitXor),
-            //
-            // List.
-            //
-            Self::lift(Operator::Car),
-            Self::lift(Operator::Cdr),
-            Self::lift(Operator::Conc),
-            Self::lift(Operator::Cons),
-            //
-            // Bytes, string, and symbol operations.
-            //
-            Self::lift(Operator::Bytes),
-            Self::lift(Operator::Chr),
-            Self::lift(Operator::Unpack),
-            Self::lift(Operator::Str),
-            Self::lift(Operator::Sym),
-            //
-            // Predicates.
-            //
-            Self::lift(Operator::IsByt),
-            Self::lift(Operator::IsChr),
-            Self::lift(Operator::IsNum),
-            Self::lift(Operator::IsLst),
-            Self::lift(Operator::IsNil),
-            Self::lift(Operator::IsStr),
-            Self::lift(Operator::IsSym),
-            Self::lift(Operator::IsTru),
-            Self::lift(Operator::IsWld),
-        ];
-        //
-        // Compile the statements.
-        //
-        stmts.into_iter().try_for_each(|v| self.load_statement(v))
+        Operator::iter()
+            .map(Self::lift)
+            .try_for_each(|v| self.load_statement(v))
     }
 
     fn lift(op: Operator) -> TopLevelStatement {

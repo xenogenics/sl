@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{heap, opcodes::Immediate};
+use crate::{atom::Atom, error::Error, heap, opcodes::Immediate};
 
 //
 // Closure.
@@ -82,6 +82,35 @@ impl std::fmt::Display for Value {
 impl From<Immediate> for Value {
     fn from(value: Immediate) -> Self {
         Self::Immediate(value)
+    }
+}
+
+impl TryFrom<Rc<Atom>> for Value {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            Atom::Nil(_)
+            | Atom::True(_)
+            | Atom::Char(..)
+            | Atom::Number(..)
+            | Atom::Symbol(..)
+            | Atom::Wildcard(_) => Immediate::try_from(value).map(Self::Immediate),
+            Atom::Pair(..) | Atom::String(..) => {
+                let val: heap::Value = value.try_into()?;
+                Ok(Self::Heap(Rc::new(val)))
+            }
+        }
+    }
+}
+
+impl From<Rc<heap::Value>> for Value {
+    fn from(value: Rc<heap::Value>) -> Self {
+        match value.as_ref() {
+            heap::Value::Closure(v) => Self::Closure(v.clone()),
+            heap::Value::Immediate(v) => Self::Immediate(*v),
+            _ => Self::Heap(value),
+        }
     }
 }
 

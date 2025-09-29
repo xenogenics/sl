@@ -182,6 +182,51 @@ impl VirtualMachine {
         //
         match ops[pc] {
             //
+            // Function application.
+            //
+            // NOTE(xrg): call a function/closure/etc. on a list of arguments
+            // instead through an applicative form. Example:
+            //
+            // (+ 1 2) -> (+ '(1 2))
+            //
+            OpCode::Apply => {
+                let mut argcnt = 0;
+                //
+                // Get the function handle.
+                //
+                let fun = self.stack.pop();
+                let val = self.stack.pop();
+                //
+                // Process the value.
+                //
+                match val {
+                    //
+                    // In case of a list, flatten it.
+                    //
+                    Value::Heap(v) if v.is_pair() => {
+                        let values: Vec<_> = v.iter().collect();
+                        argcnt = values.len();
+                        values
+                            .into_iter()
+                            .rev()
+                            .for_each(|v| self.stack.push(v.into()));
+                    }
+                    //
+                    // In case of NIL, ignore it.
+                    //
+                    Value::Immediate(Immediate::Nil) => (),
+                    //
+                    // Unsupported.
+                    //
+                    _ => panic!("Expected a list"),
+                }
+                //
+                // Call the function.
+                //
+                self.stack.push(fun);
+                return self.call(ffis, pc, argcnt);
+            }
+            //
             // Arithmetics.
             //
             OpCode::Add => {
@@ -289,11 +334,7 @@ impl VirtualMachine {
             OpCode::Car => {
                 let result = match self.stack.pop() {
                     Value::Heap(value) => match value.as_ref() {
-                        heap::Value::Pair(value, _) => match value.as_ref() {
-                            heap::Value::Closure(v) => Value::Closure(v.clone()),
-                            heap::Value::Immediate(v) => Value::Immediate(*v),
-                            _ => Value::Heap(value.clone()),
-                        },
+                        heap::Value::Pair(value, _) => value.clone().into(),
                         _ => Immediate::Nil.into(),
                     },
                     _ => Immediate::Nil.into(),
@@ -303,11 +344,7 @@ impl VirtualMachine {
             OpCode::Cdr => {
                 let result = match self.stack.pop() {
                     Value::Heap(value) => match value.as_ref() {
-                        heap::Value::Pair(_, value) => match value.as_ref() {
-                            heap::Value::Closure(v) => Value::Closure(v.clone()),
-                            heap::Value::Immediate(v) => Value::Immediate(*v),
-                            _ => Value::Heap(value.clone()),
-                        },
+                        heap::Value::Pair(_, value) => value.clone().into(),
                         _ => Immediate::Nil.into(),
                     },
                     _ => Immediate::Nil.into(),
@@ -557,236 +594,16 @@ impl VirtualMachine {
             //
             // Control flow.
             //
-            OpCode::Br(v) => {
-                return Ok((pc as isize + v) as usize);
-            }
+            OpCode::Br(v) => return Ok((pc as isize + v) as usize),
             OpCode::Brn(v) => {
                 if matches!(self.stack.pop(), Value::Immediate(Immediate::Nil)) {
                     return Ok((pc as isize + v) as usize);
                 }
             }
-            OpCode::Call(argcnt) => match self.stack.pop() {
-                Value::Closure(v) => {
-                    //
-                    // Unpack the closure.
-                    //
-                    let (argpak, paklen) = self.stack.unpack(v);
-                    //
-                    // Decode the funcall.
-                    //
-                    match self.stack.pop().as_immediate() {
-                        Immediate::Extcall(index) => {
-                            //
-                            // Grab the external function definition.
-                            //
-                            let Some(ffi) = ffis.get_mut(index as usize) else {
-                                panic!("No such external function definition: {index}");
-                            };
-                            //
-                            // Get the function's arity.
-                            //
-                            let Arity::Some(argexp) = ffi.arity() else {
-                                unreachable!();
-                            };
-                            //
-                            // Pack in case of currying.
-                            //
-                            if argcnt + argpak < argexp as usize {
-                                let imm = Immediate::Extcall(index);
-                                self.stack.push(Value::Immediate(imm));
-                                self.stack.pack(argcnt + argpak, argcnt + paklen);
-                            }
-                            //
-                            // Execute the foreign call.
-                            //
-                            else {
-                                let values = self.stack.slice_n(argexp as usize);
-                                let result = ffi.call(values)?;
-                                self.stack.drop(argexp as usize);
-                                self.stack.push(result);
-                            }
-                        }
-                        Immediate::Funcall(addr, Arity::None) => {
-                            self.stack.push(Value::Link(pc + 1));
-                            return Ok(addr as usize);
-                        }
-                        Immediate::Funcall(addr, Arity::All) => {
-                            //
-                            // Collect the arguments into a list.
-                            //
-                            self.stack.list(argcnt);
-                            //
-                            // Push the return link and go to the funcall address.
-                            //
-                            self.stack.push(Value::Link(pc + 1));
-                            return Ok(addr as usize);
-                        }
-                        Immediate::Funcall(addr, arity @ Arity::Some(argexp)) => {
-                            //
-                            // Pack in case of currying.
-                            //
-                            if argcnt + argpak < argexp as usize {
-                                let imm = Immediate::Funcall(addr, arity);
-                                self.stack.push(Value::Immediate(imm));
-                                self.stack.pack(argcnt + argpak, argcnt + paklen);
-                            }
-                            //
-                            // Push the return link and go to the funcall address.
-                            //
-                            else {
-                                self.stack.push(Value::Link(pc + 1));
-                                return Ok(addr as usize);
-                            }
-                        }
-                        Immediate::Funcall(addr, arity @ Arity::SomeWithRem(argexp)) => {
-                            //
-                            // Pack in case of currying.
-                            //
-                            if argcnt + argpak < argexp as usize {
-                                let imm = Immediate::Funcall(addr, arity);
-                                self.stack.push(Value::Immediate(imm));
-                                self.stack.pack(argcnt + argpak, argcnt + paklen);
-                            }
-                            //
-                            // Push the return link and go to the funcall address.
-                            //
-                            else {
-                                //
-                                // Prepare the arguments, only if there are more
-                                // provided than expected.
-                                //
-                                if argcnt + argpak > argexp as usize {
-                                    for _ in 0..argexp {
-                                        self.stack.rotate(argcnt + argpak);
-                                    }
-                                }
-                                //
-                                // Collect the remaining arguments into a list.
-                                //
-                                self.stack.list(argcnt + argpak - argexp as usize);
-                                //
-                                // Rotate the arguments.
-                                //
-                                self.stack.rotate(argexp as usize + 1);
-                                //
-                                // Push the link value.
-                                //
-                                self.stack.push(Value::Link(pc + 1));
-                                return Ok(addr as usize);
-                            }
-                        }
-                        _ => {
-                            panic!("Expected an extcall, funcall or syscall");
-                        }
-                    }
-                }
-                Value::Immediate(Immediate::Extcall(index)) => {
-                    //
-                    // Grab the external function definition.
-                    //
-                    let Some(ffi) = ffis.get_mut(index as usize) else {
-                        panic!("No such external function definition: {index}");
-                    };
-                    //
-                    // Get the function's arity.
-                    //
-                    let Arity::Some(argexp) = ffi.arity() else {
-                        unreachable!();
-                    };
-                    //
-                    // Pack in case of currying.
-                    //
-                    if argcnt < argexp as usize {
-                        let imm = Immediate::Extcall(index);
-                        self.stack.push(Value::Immediate(imm));
-                        self.stack.pack(argcnt, argcnt + 1);
-                    }
-                    //
-                    // Execute the foreign call.
-                    //
-                    else {
-                        let values = self.stack.slice_n(argexp as usize);
-                        let result = ffi.call(values)?;
-                        self.stack.drop(argexp as usize);
-                        self.stack.push(result);
-                    }
-                }
-                Value::Immediate(Immediate::Funcall(addr, Arity::None)) => {
-                    self.stack.push(Value::Link(pc + 1));
-                    return Ok(addr as usize);
-                }
-                Value::Immediate(Immediate::Funcall(addr, Arity::All)) => {
-                    //
-                    // Collect the arguments into a list.
-                    //
-                    self.stack.list(argcnt);
-                    //
-                    // Push the return link and go to the funcall address.
-                    //
-                    self.stack.push(Value::Link(pc + 1));
-                    return Ok(addr as usize);
-                }
-                Value::Immediate(Immediate::Funcall(addr, arity @ Arity::Some(argexp))) => {
-                    //
-                    // Pack in case of currying.
-                    //
-                    if argcnt < argexp as usize {
-                        let imm = Immediate::Funcall(addr, arity);
-                        self.stack.push(Value::Immediate(imm));
-                        self.stack.pack(argcnt, argcnt + 1);
-                    }
-                    //
-                    // Push the return link and go to the funcall address.
-                    //
-                    else {
-                        self.stack.push(Value::Link(pc + 1));
-                        return Ok(addr as usize);
-                    }
-                }
-                Value::Immediate(Immediate::Funcall(addr, arity @ Arity::SomeWithRem(argexp))) => {
-                    //
-                    // Pack in case of currying.
-                    //
-                    if argcnt < argexp as usize {
-                        let imm = Immediate::Funcall(addr, arity);
-                        self.stack.push(Value::Immediate(imm));
-                        self.stack.pack(argcnt, argcnt + 1);
-                    }
-                    //
-                    // Push the return link and go to the funcall address.
-                    //
-                    else {
-                        //
-                        // Prepare the arguments, only if there are more
-                        // provided than expected.
-                        //
-                        if argcnt > argexp as usize {
-                            for _ in 0..argexp {
-                                self.stack.rotate(argcnt);
-                            }
-                        }
-                        //
-                        // Collect the remaining arguments into a list.
-                        //
-                        self.stack.list(argcnt - argexp as usize);
-                        //
-                        // Rotate the arguments.
-                        //
-                        self.stack.rotate(argexp as usize + 1);
-                        //
-                        // Push the link value.
-                        //
-                        self.stack.push(Value::Link(pc + 1));
-                        return Ok(addr as usize);
-                    }
-                }
-                _ => panic!("Expected a closure, extcall, funcall or syscall"),
-            },
-            OpCode::Ret => {
-                return Ok(self.stack.unlink().as_link());
-            }
+            OpCode::Call(argcnt) => return self.call(ffis, pc, argcnt),
+            OpCode::Ret => return Ok(self.stack.unlink().as_link()),
             //
-            // self.stack operations.
+            // Stack operations.
             //
             OpCode::Dup(v) => self.stack.dup(v),
             OpCode::Get(v) => self.stack.get(v),
@@ -816,5 +633,233 @@ impl VirtualMachine {
             .iter()
             .map(|(_, v)| ffi::Stub::try_from(v.clone()))
             .collect()
+    }
+
+    fn call(&mut self, ffis: &mut [Stub], pc: usize, argcnt: usize) -> Result<usize, Error> {
+        match self.stack.pop() {
+            Value::Closure(v) => {
+                //
+                // Unpack the closure.
+                //
+                let (argpak, paklen) = self.stack.unpack(v);
+                //
+                // Decode the funcall.
+                //
+                match self.stack.pop().as_immediate() {
+                    Immediate::Extcall(index) => {
+                        //
+                        // Grab the external function definition.
+                        //
+                        let Some(ffi) = ffis.get_mut(index as usize) else {
+                            panic!("No such external function definition: {index}");
+                        };
+                        //
+                        // Get the function's arity.
+                        //
+                        let Arity::Some(argexp) = ffi.arity() else {
+                            unreachable!();
+                        };
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt + argpak < argexp as usize {
+                            let imm = Immediate::Extcall(index);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt + argpak, argcnt + paklen);
+                            Ok(pc + 1)
+                        }
+                        //
+                        // Execute the foreign call.
+                        //
+                        else {
+                            let values = self.stack.slice_n(argexp as usize);
+                            let result = ffi.call(values)?;
+                            self.stack.drop(argexp as usize);
+                            self.stack.push(result);
+                            Ok(pc + 1)
+                        }
+                    }
+                    Immediate::Funcall(addr, Arity::None) => {
+                        self.stack.push(Value::Link(pc + 1));
+                        return Ok(addr as usize);
+                    }
+                    Immediate::Funcall(addr, Arity::All) => {
+                        //
+                        // Collect the arguments into a list.
+                        //
+                        self.stack.list(argcnt);
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        self.stack.push(Value::Link(pc + 1));
+                        return Ok(addr as usize);
+                    }
+                    Immediate::Funcall(addr, arity @ Arity::Some(argexp)) => {
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt + argpak < argexp as usize {
+                            let imm = Immediate::Funcall(addr, arity);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt + argpak, argcnt + paklen);
+                            Ok(pc + 1)
+                        }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            self.stack.push(Value::Link(pc + 1));
+                            return Ok(addr as usize);
+                        }
+                    }
+                    Immediate::Funcall(addr, arity @ Arity::SomeWithRem(argexp)) => {
+                        //
+                        // Pack in case of currying.
+                        //
+                        if argcnt + argpak < argexp as usize {
+                            let imm = Immediate::Funcall(addr, arity);
+                            self.stack.push(Value::Immediate(imm));
+                            self.stack.pack(argcnt + argpak, argcnt + paklen);
+                            Ok(pc + 1)
+                        }
+                        //
+                        // Push the return link and go to the funcall address.
+                        //
+                        else {
+                            //
+                            // Prepare the arguments, only if there are more
+                            // provided than expected.
+                            //
+                            if argcnt + argpak > argexp as usize {
+                                for _ in 0..argexp {
+                                    self.stack.rotate(argcnt + argpak);
+                                }
+                            }
+                            //
+                            // Collect the remaining arguments into a list.
+                            //
+                            self.stack.list(argcnt + argpak - argexp as usize);
+                            //
+                            // Rotate the arguments.
+                            //
+                            self.stack.rotate(argexp as usize + 1);
+                            //
+                            // Push the link value.
+                            //
+                            self.stack.push(Value::Link(pc + 1));
+                            return Ok(addr as usize);
+                        }
+                    }
+                    _ => {
+                        panic!("Expected an extcall, funcall or syscall");
+                    }
+                }
+            }
+            Value::Immediate(Immediate::Extcall(index)) => {
+                //
+                // Grab the external function definition.
+                //
+                let Some(ffi) = ffis.get_mut(index as usize) else {
+                    panic!("No such external function definition: {index}");
+                };
+                //
+                // Get the function's arity.
+                //
+                let Arity::Some(argexp) = ffi.arity() else {
+                    unreachable!();
+                };
+                //
+                // Pack in case of currying.
+                //
+                if argcnt < argexp as usize {
+                    let imm = Immediate::Extcall(index);
+                    self.stack.push(Value::Immediate(imm));
+                    self.stack.pack(argcnt, argcnt + 1);
+                    Ok(pc + 1)
+                }
+                //
+                // Execute the foreign call.
+                //
+                else {
+                    let values = self.stack.slice_n(argexp as usize);
+                    let result = ffi.call(values)?;
+                    self.stack.drop(argexp as usize);
+                    self.stack.push(result);
+                    Ok(pc + 1)
+                }
+            }
+            Value::Immediate(Immediate::Funcall(addr, Arity::None)) => {
+                self.stack.push(Value::Link(pc + 1));
+                return Ok(addr as usize);
+            }
+            Value::Immediate(Immediate::Funcall(addr, Arity::All)) => {
+                //
+                // Collect the arguments into a list.
+                //
+                self.stack.list(argcnt);
+                //
+                // Push the return link and go to the funcall address.
+                //
+                self.stack.push(Value::Link(pc + 1));
+                return Ok(addr as usize);
+            }
+            Value::Immediate(Immediate::Funcall(addr, arity @ Arity::Some(argexp))) => {
+                //
+                // Pack in case of currying.
+                //
+                if argcnt < argexp as usize {
+                    let imm = Immediate::Funcall(addr, arity);
+                    self.stack.push(Value::Immediate(imm));
+                    self.stack.pack(argcnt, argcnt + 1);
+                    Ok(pc + 1)
+                }
+                //
+                // Push the return link and go to the funcall address.
+                //
+                else {
+                    self.stack.push(Value::Link(pc + 1));
+                    return Ok(addr as usize);
+                }
+            }
+            Value::Immediate(Immediate::Funcall(addr, arity @ Arity::SomeWithRem(argexp))) => {
+                //
+                // Pack in case of currying.
+                //
+                if argcnt < argexp as usize {
+                    let imm = Immediate::Funcall(addr, arity);
+                    self.stack.push(Value::Immediate(imm));
+                    self.stack.pack(argcnt, argcnt + 1);
+                    Ok(pc + 1)
+                }
+                //
+                // Push the return link and go to the funcall address.
+                //
+                else {
+                    //
+                    // Prepare the arguments, only if there are more
+                    // provided than expected.
+                    //
+                    if argcnt > argexp as usize {
+                        for _ in 0..argexp {
+                            self.stack.rotate(argcnt);
+                        }
+                    }
+                    //
+                    // Collect the remaining arguments into a list.
+                    //
+                    self.stack.list(argcnt - argexp as usize);
+                    //
+                    // Rotate the arguments.
+                    //
+                    self.stack.rotate(argexp as usize + 1);
+                    //
+                    // Push the link value.
+                    //
+                    self.stack.push(Value::Link(pc + 1));
+                    return Ok(addr as usize);
+                }
+            }
+            _ => panic!("Expected a closure, extcall, funcall or syscall"),
+        }
     }
 }

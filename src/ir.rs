@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fmt::Display, rc::Rc, str::FromStr};
 
 use bincode::{Decode, Encode};
-use strum_macros::EnumString;
+use strum_macros::{Display, EnumIter, EnumString};
 
 use crate::{atom::Atom, error::Error, opcodes::Arity};
 
@@ -327,8 +327,10 @@ enum Keyword {
 // Built-in operator.
 //
 
-#[derive(Clone, Copy, Debug, strum_macros::Display, EnumString, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Display, EnumIter, EnumString, Eq, PartialEq)]
 pub enum Operator {
+    #[strum(serialize = "apply")]
+    Apply,
     //
     // Arithmetics.
     //
@@ -424,6 +426,7 @@ pub enum Operator {
 impl Operator {
     pub fn argument_count(&self) -> usize {
         match self {
+            Operator::Apply => 2,
             Operator::Add => 2,
             Operator::Sub => 2,
             Operator::Mul => 2,

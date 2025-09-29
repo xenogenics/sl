@@ -6,12 +6,16 @@ use crate::atom::Span;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Main endpoint not defined")]
+    EntrypointNotDefined,
     #[error(transparent)]
     Environment(#[from] VarError),
     #[error("Expected function call")]
     ExpectedFunctionCall(Span),
     #[error("Expected function definition")]
     ExpectedFunctionDefinition(Span),
+    #[error("Expected immediate")]
+    ExpectedImmediate(Span),
     #[error("Expected lambda definition")]
     ExpectedLambdaDefinition(Span),
     #[error("Expected macro")]
@@ -22,6 +26,8 @@ pub enum Error {
     ExpectedPair(Span),
     #[error("Expected pair or immediate")]
     ExpectedPairOrImmediate(Span),
+    #[error("Expected pair or string")]
+    ExpectedPairOrString(Span),
     #[error("Expected pair or symbol")]
     ExpectedPairOrSymbol(Span),
     #[error("Expected quote")]
@@ -50,8 +56,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Macro expansion failed: {0}")]
     MacroExpansion(Box<str>),
-    #[error("Main endpoint not defined")]
-    EntrypointNotDefined,
     #[cfg(test)]
     #[error("No such context")]
     NoSuchContext,

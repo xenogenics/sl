@@ -2,7 +2,8 @@
   '(io STDOUT write)
   '(iterators foldr iter)
   '(lang |> match)
-  '(list len))
+  '(list len)
+  '(str >chars >str))
 
 ;
 ; String escape.
@@ -69,7 +70,7 @@
 
 (def print @
   "Write all arguments to STDOUT."
-  (iter prin1 @))
+  (iter (\ (v) (prin1 (>str v))) @))
 
 (def prin1ln (value)
   "Write string VALUE and a newline to STDOUT."
@@ -78,5 +79,5 @@
 
 (def println @
   "Write string VALUE and a newline to STDOUT."
-  (iter prin1 @)
+  (iter (\ (v) (prin1 (>str v))) @)
   (prin1 "\n"))

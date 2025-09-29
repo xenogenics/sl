@@ -1,4 +1,8 @@
+use std::rc::Rc;
+
 use bincode::{Decode, Encode};
+
+use crate::{atom::Atom, error::Error};
 
 //
 // Arity.
@@ -108,6 +112,27 @@ impl From<i64> for Immediate {
     }
 }
 
+impl TryFrom<Rc<Atom>> for Immediate {
+    type Error = Error;
+
+    fn try_from(value: Rc<Atom>) -> Result<Self, Self::Error> {
+        match value.as_ref() {
+            Atom::Nil(_) => Ok(Self::Nil),
+            Atom::True(_) => Ok(Self::True),
+            Atom::Char(_, v) => Ok(Self::Char(*v)),
+            Atom::Number(_, v) => Ok(Self::Number(*v)),
+            Atom::Symbol(_, v) => {
+                let bytes = v.as_bytes();
+                let mut raw = [0; 15];
+                raw[0..bytes.len()].copy_from_slice(bytes);
+                Ok(Immediate::Symbol(raw))
+            }
+            Atom::Wildcard(_) => Ok(Self::Wildcard),
+            _ => Err(Error::ExpectedImmediate(value.span())),
+        }
+    }
+}
+
 //
 // Opcodes.
 //
@@ -115,6 +140,10 @@ impl From<i64> for Immediate {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Encode, Decode)]
 #[repr(u8)]
 pub enum OpCode {
+    //
+    // Function application.
+    //
+    Apply,
     //
     // Arithmetics.
     //
@@ -193,6 +222,7 @@ pub enum OpCode {
 impl std::fmt::Display for OpCode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            OpCode::Apply => write!(f, "Apply"),
             OpCode::Add => write!(f, "Add"),
             OpCode::Sub => write!(f, "Sub"),
             OpCode::Mul => write!(f, "Mul"),
