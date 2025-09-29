@@ -1,10 +1,10 @@
 (use '(iterators foldl rev))
 
-(mac |> (val . lst)
+(mac |> (value . rem)
   "Evaluate the first element of LST with VAL and pass down the result."
   (foldl
     (\ (acc elt) (cons elt (cons acc nil)))
-    val lst))
+    value rem))
 
 (mac cond (value . cases)
   "Evaluate VALUE and check IT against each CASE"

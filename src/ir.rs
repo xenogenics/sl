@@ -6,14 +6,116 @@ use strum_macros::EnumString;
 use crate::{atom::Atom, error::Error, opcodes::Arity};
 
 //
+// Binding.
+//
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Binding {
+    Deconstructed(Vec<(Box<str>, Vec<Operator>)>),
+    Passthrough(Box<str>),
+}
+
+impl Binding {
+    pub fn has_deconstructions(&self) -> bool {
+        matches!(self, Self::Deconstructed(_))
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Deconstructed(v) => v.len(),
+            Self::Passthrough(_) => 1,
+        }
+    }
+
+    pub fn names(&self) -> Box<dyn std::iter::DoubleEndedIterator<Item = &Box<str>> + '_> {
+        match self {
+            Self::Deconstructed(v) => Box::new(v.iter().map(|v| &v.0)),
+            Self::Passthrough(v) => Box::new(Some(v).into_iter()),
+        }
+    }
+
+    fn from_atom(atom: Rc<Atom>) -> Result<Self, Error> {
+        match atom.as_ref() {
+            Atom::Pair(..) => {
+                let mut result = vec![];
+                Self::collect(atom, vec![], &mut result)?;
+                Ok(Self::Deconstructed(result))
+            }
+            Atom::Symbol(_, v) if Keyword::from_str(v).is_ok() => {
+                Err(Error::ReservedKeyword(v.clone()))
+            }
+            Atom::Symbol(_, v) => Ok(Self::Passthrough(v.clone())),
+            _ => Err(Error::ExpectedPairOrSymbol(atom.span())),
+        }
+    }
+
+    fn collect(
+        atom: Rc<Atom>,
+        ops: Vec<Operator>,
+        res: &mut Vec<(Box<str>, Vec<Operator>)>,
+    ) -> Result<(), Error> {
+        match atom.as_ref() {
+            Atom::Pair(_, car, cdr) => {
+                //
+                // Process the CAR branch.
+                //
+                let mut next = ops.clone();
+                next.push(Operator::Car);
+                Self::collect(car.clone(), next, res)?;
+                //
+                // Process the CDR branch.
+                //
+                let mut next = ops.clone();
+                next.push(Operator::Cdr);
+                Self::collect(cdr.clone(), next, res)?;
+                //
+                // Done.
+                //
+                Ok(())
+            }
+            Atom::Symbol(_, v) => {
+                res.push((v.clone(), ops));
+                Ok(())
+            }
+            Atom::Nil(_) | Atom::Wildcard(_) => Ok(()),
+            _ => {
+                println!("{atom}");
+                Err(Error::ExpectedPairOrSymbol(atom.span()))
+            }
+        }
+    }
+}
+
+//
+// Bindings.
+//
+
+#[derive(Clone, Debug)]
+pub struct Bindings(Vec<(Binding, Statement)>);
+
+impl Bindings {
+    pub fn has_deconstructions(&self) -> bool {
+        self.0
+            .iter()
+            .map(|(v, _)| v.has_deconstructions())
+            .reduce(|a, b| a || b)
+            .unwrap_or_default()
+    }
+
+    pub fn iter(&self) -> impl std::iter::DoubleEndedIterator<Item = &(Binding, Statement)> {
+        self.0.iter()
+    }
+}
+
+//
 // Arguments.
 //
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Arguments {
     Capture(Box<str>),
-    List(Vec<Box<str>>),
-    ListAndCapture(Vec<Box<str>>, Box<str>),
+    List(Vec<Binding>),
+    ListAndCapture(Vec<Binding>, Box<str>),
     None,
 }
 
@@ -27,12 +129,23 @@ impl Arguments {
         }
     }
 
-    pub fn iter(&self) -> Box<dyn std::iter::DoubleEndedIterator<Item = &Box<str>> + '_> {
+    pub fn names(&self) -> Box<dyn std::iter::DoubleEndedIterator<Item = &Box<str>> + '_> {
         match self {
             Arguments::Capture(v) => Box::new(Some(v).into_iter()),
-            Arguments::List(items) => Box::new(items.iter()),
-            Arguments::ListAndCapture(items, last) => Box::new(items.iter().chain(Some(last))),
+            Arguments::List(items) => Box::new(items.iter().flat_map(|v| v.names())),
+            Arguments::ListAndCapture(items, last) => {
+                Box::new(items.iter().flat_map(|v| v.names()).chain(Some(last)))
+            }
             Arguments::None => Box::new(None.iter()),
+        }
+    }
+
+    pub fn bindings(&self) -> Box<dyn std::iter::DoubleEndedIterator<Item = &Binding> + '_> {
+        match self {
+            Arguments::List(groups) | Arguments::ListAndCapture(groups, _) => {
+                Box::new(groups.iter())
+            }
+            _ => Box::new(None.into_iter()),
         }
     }
 
@@ -53,7 +166,18 @@ impl Arguments {
         }
     }
 
-    fn from_pair(atom: Rc<Atom>, mut syms: Vec<Box<str>>) -> Result<Self, Error> {
+    pub fn has_deconstructions(&self) -> bool {
+        match self {
+            Arguments::List(groups) | Arguments::ListAndCapture(groups, _) => groups
+                .iter()
+                .map(|v| v.has_deconstructions())
+                .reduce(|a, b| a || b)
+                .unwrap_or_default(),
+            _ => false,
+        }
+    }
+
+    fn from_pair(atom: Rc<Atom>, mut bindings: Vec<Binding>) -> Result<Self, Error> {
         /*
          * Split the atom.
          */
@@ -61,22 +185,17 @@ impl Arguments {
             return Err(Error::ExpectedPair(atom.span()));
         };
         /*
-         * Make sure CAR is a symbol.
+         * Save the argumetn group.
          */
-        let Atom::Symbol(_, symbol) = car.as_ref() else {
-            return Err(Error::ExpectedSymbol(car.span()));
-        };
-        /*
-         * Save the symbol.
-         */
-        syms.push(symbol.clone());
+        let binding = Binding::from_atom(car.clone())?;
+        bindings.push(binding);
         /*
          * Check CDR.
          */
         match cdr.as_ref() {
-            Atom::Nil(_) => Ok(Self::List(syms)),
-            Atom::Pair(..) => Self::from_pair(cdr.clone(), syms),
-            Atom::Symbol(_, v) => Ok(Self::ListAndCapture(syms, v.clone())),
+            Atom::Nil(_) => Ok(Self::List(bindings)),
+            Atom::Pair(..) => Self::from_pair(cdr.clone(), bindings),
+            Atom::Symbol(_, v) => Ok(Self::ListAndCapture(bindings, v.clone())),
             _ => Err(Error::ExpectedPairOrSymbol(cdr.span())),
         }
     }
@@ -538,7 +657,7 @@ pub enum Statement {
         Box<Statement>,
         Option<Box<Statement>>,
     ),
-    Let(Rc<Atom>, Vec<(Box<str>, Statement)>, Statements),
+    Let(Rc<Atom>, Bindings, Statements),
     Prog(Rc<Atom>, Statements),
     //
     // Quotes.
@@ -580,7 +699,7 @@ impl Statement {
             }
             Statement::Lambda(_, args, stmts) => {
                 let mut v = stmts.closure();
-                args.iter().for_each(|s| {
+                args.names().for_each(|s| {
                     v.remove(s);
                 });
                 v
@@ -604,12 +723,12 @@ impl Statement {
                 // NOTE(xrg): binding symbol are incrementally removed from the
                 // closures as they are defined.
                 //
-                let mut v = bindings.iter().fold(BTreeSet::new(), |mut acc, (sym, v)| {
+                let mut v = bindings.iter().fold(BTreeSet::new(), |mut acc, (b, v)| {
                     let mut v = v.closure();
                     args.iter().for_each(|s| {
                         v.remove(s);
                     });
-                    args.insert(sym.clone());
+                    args.extend(b.names().cloned());
                     acc.extend(v);
                     acc
                 });
@@ -741,21 +860,13 @@ impl Statement {
                             //
                             // Make sure the binding is a pair.
                             //
-                            let Atom::Pair(_, symbol, stmt) = v.as_ref() else {
+                            let Atom::Pair(_, binding, stmt) = v.as_ref() else {
                                 return Err(Error::ExpectedPair(v.span()));
                             };
                             //
-                            // Make sure the symbol is a symbol.
+                            // Parse the binding.
                             //
-                            let Atom::Symbol(_, symbol) = symbol.as_ref() else {
-                                return Err(Error::ExpectedSymbol(symbol.span()));
-                            };
-                            //
-                            // Make sure it's not a reserved keyword.
-                            //
-                            if Keyword::from_str(symbol).is_ok() {
-                                return Err(Error::ReservedKeyword(name.clone()));
-                            }
+                            let binding = Binding::from_atom(binding.clone())?;
                             //
                             // Parse the statement.
                             //
@@ -763,7 +874,7 @@ impl Statement {
                             //
                             // Done.
                             //
-                            Ok((symbol.clone(), v))
+                            Ok((binding, v))
                         })
                         .collect::<Result<_, _>>()?;
                     //
@@ -773,7 +884,7 @@ impl Statement {
                     //
                     // Done.
                     //
-                    Ok(Self::Let(atom, bindings, stmts))
+                    Ok(Self::Let(atom, Bindings(bindings), stmts))
                 }
                 //
                 // Function definition are forbidden.
@@ -1346,7 +1457,7 @@ impl FunctionDefinition {
 
     pub fn closure(&self) -> BTreeSet<Box<str>> {
         let mut v = self.2.closure();
-        self.1.iter().for_each(|s| {
+        self.1.names().for_each(|s| {
             v.remove(s);
         });
         v

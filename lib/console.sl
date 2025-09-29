@@ -50,11 +50,8 @@
 (def style (style value)
   (match style
     ~(foldr
-       (\ (e acc)
-         (let ((iden . (car e))
-               (code . (cdr e)))
-           (cons `(,iden . (esc ,code value)) acc) 
-       ))
+       (\ ((iden . code) acc)
+         (cons `(,iden . (esc ,code value)) acc))
        STYLE_TABLE
        nil
      )))

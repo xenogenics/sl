@@ -11,8 +11,8 @@ use crate::{
     error::Error,
     grammar::ListsParser,
     ir::{
-        Arguments, Backquote, CallSite, ConstantDefinition, ExternalDefinition, FunctionDefinition,
-        Operator, Quote, Statement, Statements, TopLevelStatement, Value,
+        Arguments, Backquote, Binding, Bindings, CallSite, ConstantDefinition, ExternalDefinition,
+        FunctionDefinition, Operator, Quote, Statement, Statements, TopLevelStatement, Value,
     },
     opcodes::{Arity, Immediate, OpCode, OpCodes},
     vm::{RunParameters, VirtualMachine},
@@ -46,6 +46,84 @@ impl Context {
         }
     }
 
+    fn deconstruct_binding(&mut self, mappings: &[(Box<str>, Vec<Operator>)]) {
+        //
+        // Process the deconstruction operators.
+        //
+        for (_, operators) in mappings.iter().rev() {
+            //
+            // Duplicate the argument.
+            //
+            self.stream.push_back(OpCode::Dup(1).into());
+            //
+            // Convert the operators.
+            //
+            for op in operators {
+                match op {
+                    Operator::Car => self.stream.push_back(OpCode::Car.into()),
+                    Operator::Cdr => self.stream.push_back(OpCode::Cdr.into()),
+                    _ => unreachable!(),
+                }
+            }
+            //
+            // Swap the result and the original argument.
+            //
+            self.stream.push_back(OpCode::Swp.into());
+        }
+        //
+        // Clear the original argument.
+        //
+        self.stream.push_back(OpCode::Pop(1).into());
+    }
+
+    fn deconstruct_arguments(&mut self, args: &Arguments) -> usize {
+        self.deconstruct_arguments_with_closure(args, &BTreeSet::new())
+    }
+
+    fn deconstruct_arguments_with_closure(
+        &mut self,
+        args: &Arguments,
+        closure: &BTreeSet<Box<str>>,
+    ) -> usize {
+        let mut argcnt = args.len() + closure.len();
+        //
+        // Skip if their is no deconstruction.
+        //
+        if !args.has_deconstructions() {
+            return argcnt;
+        }
+        //
+        // Shift closure and arguments.
+        //
+        if !closure.is_empty() {
+            let opcode = OpCode::Rtm(argcnt, closure.len());
+            self.stream.push_back(opcode.into());
+        }
+        //
+        // Process the bindings.
+        //
+        for b in args.bindings() {
+            //
+            // Handle binding deconstruction.
+            //
+            if let Binding::Deconstructed(mappings) = b {
+                self.deconstruct_binding(mappings);
+            }
+            //
+            // Update the argument count.
+            //
+            argcnt = argcnt - 1 + b.len();
+            //
+            // Rotate the arguments.
+            //
+            self.stream.push_back(OpCode::Rtm(argcnt, b.len()).into());
+        }
+        //
+        // Done.
+        //
+        argcnt
+    }
+
     fn track_arguments(&mut self, args: &Arguments) {
         self.track_arguments_and_closure(args, &BTreeSet::new());
     }
@@ -54,7 +132,7 @@ impl Context {
         //
         // Track the arguments.
         //
-        args.iter().rev().for_each(|v| {
+        args.names().rev().for_each(|v| {
             self.locals.entry(v.clone()).or_default().push(self.stackn);
             self.stackn += 1;
         });
@@ -570,7 +648,7 @@ impl Compiler {
 
     fn compile_function(&mut self, defun: FunctionDefinition) -> Result<(), Error> {
         let arity = defun.arguments().arity();
-        let argcnt = defun.arguments().len();
+        let mut argcnt = defun.arguments().len();
         let mut ctxt = Context::new(defun.name().clone(), arity, false);
         //
         // Track the function arguments.
@@ -581,10 +659,17 @@ impl Compiler {
         //
         self.defuns.insert(defun.name().clone(), arity);
         //
-        // Rotate the arguments and the return address.
+        // Process the arguments.
         //
         if argcnt > 0 {
+            //
+            // Rotate the arguments and the return address.
+            //
             ctxt.stream.push_back(OpCode::Rot(argcnt + 1).into());
+            //
+            // Deconstruct the arguments.
+            //
+            argcnt = ctxt.deconstruct_arguments(defun.arguments());
         }
         //
         // Compile the statements.
@@ -627,53 +712,89 @@ impl Compiler {
     fn compile_bindings(
         &mut self,
         ctxt: &mut Context,
-        bindings: &[(Box<str>, Statement)],
-    ) -> Result<(), Error> {
-        bindings.iter().try_for_each(|(symbol, stmt)| {
+        bindings: &Bindings,
+    ) -> Result<usize, Error> {
+        bindings.iter().try_fold(0, |acc, (binding, stmt)| {
             //
             // Compile the statement.
             //
             self.compile_statement(ctxt, stmt)?;
             //
-            // Save the symbol's index.
+            // Binding deconstruction.
             //
-            ctxt.locals
-                .entry(symbol.clone())
-                .or_default()
-                .push(ctxt.stackn - 1);
-            //
-            // Done.
-            //
-            Ok(())
+            match binding {
+                Binding::Deconstructed(mappings) => {
+                    //
+                    // Deconstruct the binding.
+                    //
+                    ctxt.deconstruct_binding(mappings);
+                    //
+                    // Consume the original value.
+                    //
+                    ctxt.stackn -= 1;
+                    //
+                    // Process the bindings' indices.
+                    //
+                    binding.names().rev().for_each(|name| {
+                        //
+                        // Track the bindings' indices.
+                        //
+                        ctxt.locals
+                            .entry(name.clone())
+                            .or_default()
+                            .push(ctxt.stackn);
+                        //
+                        // Increase the stack.
+                        //
+                        ctxt.stackn += 1;
+                    });
+                    //
+                    // Done.
+                    //
+                    Ok(acc + binding.len())
+                }
+                Binding::Passthrough(name) => {
+                    //
+                    // Track the binding's index.
+                    //
+                    ctxt.locals
+                        .entry(name.clone())
+                        .or_default()
+                        .push(ctxt.stackn - 1);
+                    //
+                    // Done.
+                    //
+                    Ok(acc + 1)
+                }
+            }
         })
     }
 
-    fn clear_bindings(
-        &mut self,
-        ctxt: &mut Context,
-        bindings: &[(Box<str>, Statement)],
-    ) -> Result<(), Error> {
-        bindings.iter().try_for_each(|(symbol, _)| {
-            //
-            // Clear the binding.
-            //
-            if let Some(v) = ctxt.locals.get_mut(symbol) {
+    fn clear_bindings(&mut self, ctxt: &mut Context, bindings: &Bindings) -> Result<(), Error> {
+        bindings
+            .iter()
+            .flat_map(|(binding, _)| binding.names())
+            .try_for_each(|name| {
                 //
-                // Remove the top reference.
+                // Clear the binding.
                 //
-                v.pop();
-                //
-                // Clear the entry if there is no more references.
-                //
-                if v.is_empty() {
-                    ctxt.locals.remove(symbol);
+                if let Some(v) = ctxt.locals.get_mut(name) {
+                    //
+                    // Remove the top reference.
+                    //
+                    v.pop();
+                    //
+                    // Clear the entry if there is no more references.
+                    //
+                    if v.is_empty() {
+                        ctxt.locals.remove(name);
+                    }
                 }
-            }
-            //
-            // Done.
-            //
-            Ok(())
-        })
+                //
+                // Done.
+                //
+                Ok(())
+            })
     }
 
     fn compile_statements(&mut self, ctxt: &mut Context, stmts: &Statements) -> Result<(), Error> {
@@ -1050,13 +1171,26 @@ impl Compiler {
                     closure.remove(v);
                 });
                 //
-                // Compute the preamble depth.
-                //
-                let argcnt = args.len() + closure.len();
-                //
                 // Track the function arguments.
                 //
                 next.track_arguments_and_closure(args, &closure);
+                //
+                // Compute the preamble depth.
+                //
+                let mut argcnt = args.len() + closure.len();
+                //
+                // Process the arguments.
+                //
+                if argcnt > 0 {
+                    //
+                    // Rotate the arguments and the return address.
+                    //
+                    next.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                    //
+                    // Deconstruct the arguments.
+                    //
+                    argcnt = next.deconstruct_arguments_with_closure(args, &closure);
+                }
                 //
                 // Update the next context's closure.
                 //
@@ -1066,20 +1200,11 @@ impl Compiler {
                 //
                 self.compile_statements(&mut next, statements)?;
                 //
-                // Generate the preamble and the postamble.
+                // Generate the postamble if necessary.
                 //
                 if argcnt > 0 {
-                    //
-                    // Generate the preamble.
-                    //
-                    next.stream.push_front(OpCode::Rot(argcnt + 1).into());
-                    //
-                    // Generate the postamble.
-                    //
-                    if argcnt > 0 {
-                        next.stream.push_back(OpCode::Rot(argcnt + 1).into());
-                        next.stream.push_back(OpCode::Pop(argcnt).into());
-                    }
+                    next.stream.push_back(OpCode::Rot(argcnt + 1).into());
+                    next.stream.push_back(OpCode::Pop(argcnt).into());
                 }
                 //
                 // Inject the return call.
@@ -1270,11 +1395,10 @@ impl Compiler {
                 Ok(())
             }
             Statement::Let(_, bindings, statements) => {
-                let argcnt = bindings.len();
                 //
                 // Compile the bindings.
                 //
-                self.compile_bindings(ctxt, bindings)?;
+                let argcnt = self.compile_bindings(ctxt, bindings)?;
                 //
                 // Compile the statements.
                 //

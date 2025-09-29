@@ -66,7 +66,7 @@
     (lst? . (let ((rec . (\ (e)
                            (if e
                              (let ((hd . (>chars (car e)))
-                                  (tl . (cdr e)))
+                                   (tl . (cdr e)))
                                (if tl
                                  (conc hd (cons ^\s (self tl)))
                                  (conc hd (self tl))))

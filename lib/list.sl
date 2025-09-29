@@ -57,13 +57,11 @@
 (def replace (k v lst)
   "Replace the entry for K with V in the association list LST."
   (foldr
-    (\ (e acc)
-      (let ((_k . (car e))
-            (_v . (cdr e)))
-        (if (= k _k)
-          (cons (cons k v) acc)
-          (cons (cons _k _v) acc)
-    )))
+    (\ ((_k . _v) acc)
+      (if (= k _k)
+        (cons (cons k v) acc)
+        (cons (cons _k _v) acc)
+    ))
     lst nil))
 
 ;
@@ -82,13 +80,11 @@
   (foldr (\ (elt acc)
    (if (nil? acc)
      (cons elt acc)
-     (let ((action . (cmp elt (car acc)))
-           (cmd    . (car action))
-           (value  . (cdr action)))
+     (let (((cmd . value) . (cmp elt (car acc))))
        (match cmd
          (APPEND  . (cons value acc))
          (REPLACE . (cons value (cdr acc)))
-         (SKIP  . acc)))))
+         (SKIP    . acc)))))
   lst nil))
 
 (def flatten (lst)
@@ -127,19 +123,15 @@
 
 (def split (fun lst)
   "Split the list LST according to the predicate FUN."
-  (let ((state  . (foldr
-                    (\ (e acc)
-                       (let ((stack  . (car acc))
-                             (result . (cdr acc)))
-                          (if (fun e)
-                             (cons nil (cons (cons e stack) result))
-                             (cons (cons e stack) result))))
-                    lst
-                    '(nil)
-                  ))
-        (stack  . (car state))
-        (result . (cdr state)))
-  (cons stack result)
+  (let (((stack . result) . (foldr
+                              (\ (e (stack . result))
+                                    (if (fun e)
+                                       (cons nil (cons (cons e stack) result))
+                                       (cons (cons e stack) result)))
+                              lst
+                              nil
+                            )))
+    (cons stack result)
   ))
   
 (def sort (cmp lst)

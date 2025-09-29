@@ -928,4 +928,317 @@ mod compiler {
         );
         Ok(())
     }
+
+    #[test]
+    fn def_with_arg_decons() -> Result<(), Error> {
+        let result = compile(
+            r#"
+            (def incr (a (b . c) (_ (d)))
+                (+ a (+ b (+ c d))))
+            "#,
+        )?;
+        assert_eq!(
+            result.opcodes(),
+            vec![
+                OpCode::Rot(4),
+                //
+                // Skip the first argument.
+                //
+                OpCode::Rtm(3, 1),
+                //
+                // Process the second argument.
+                //
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Rtm(4, 2),
+                //
+                // Process the third argument.
+                //
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Rtm(4, 1),
+                //
+                // Process the body.
+                //
+                OpCode::Get(4),
+                OpCode::Get(4),
+                OpCode::Add,
+                OpCode::Get(3),
+                OpCode::Add,
+                OpCode::Get(2),
+                OpCode::Add,
+                //
+                // Postamble.
+                //
+                OpCode::Rot(5),
+                OpCode::Pop(4),
+                OpCode::Ret
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn def_with_lambda_with_arg_decons() -> Result<(), Error> {
+        let result = compile(
+            r#"
+            (def func () 
+                (\ (a (b . c) (_ (d)))
+                    (+ a (+ b (+ c d)))))
+            "#,
+        )?;
+        assert_eq!(
+            result.opcodes(),
+            vec![
+                //
+                // Lambda definition.
+                //
+                OpCode::Rot(4),
+                //
+                // Skip the first argument.
+                //
+                OpCode::Rtm(3, 1),
+                //
+                // Process the second argument.
+                //
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Rtm(4, 2),
+                //
+                // Process the third argument.
+                //
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Rtm(4, 1),
+                //
+                // Process the body.
+                //
+                OpCode::Get(4),
+                OpCode::Get(4),
+                OpCode::Add,
+                OpCode::Get(3),
+                OpCode::Add,
+                OpCode::Get(2),
+                OpCode::Add,
+                //
+                // Postamble.
+                //
+                OpCode::Rot(5),
+                OpCode::Pop(4),
+                OpCode::Ret,
+                //
+                // Func.
+                //
+                OpCode::Psh(Immediate::Funcall(0, Arity::Some(3))),
+                OpCode::Pak(0, 1),
+                OpCode::Ret
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn def_with_let_binding_with_arg_decons() -> Result<(), Error> {
+        let result = compile(
+            r#"
+            (def func (v) 
+                (let (((a  (b . c) (_ (d))) . v))
+                    (+ a (+ b (+ c d)))))
+            "#,
+        )?;
+        assert_eq!(
+            result.opcodes(),
+            vec![
+                OpCode::Rot(2),
+                OpCode::Get(1),
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Get(4),
+                OpCode::Get(4),
+                OpCode::Add,
+                OpCode::Get(3),
+                OpCode::Add,
+                OpCode::Get(2),
+                OpCode::Add,
+                OpCode::Rot(5),
+                OpCode::Pop(4),
+                OpCode::Rot(2),
+                OpCode::Pop(1),
+                OpCode::Ret
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn def_with_let_binding_with_multiple_bindings_with_arg_decons() -> Result<(), Error> {
+        let result = compile(
+            r#"
+            (def func (v w) 
+                (let (((a  (b . c) (_ (d))) . v)
+                      ((_ (_ e)) . w))
+                    (* e (+ a (+ b (+ c d))))))
+            "#,
+        )?;
+        assert_eq!(
+            result.opcodes(),
+            vec![
+                OpCode::Rot(3),
+                OpCode::Get(1),
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Get(6),
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Get(5),
+                OpCode::Get(5),
+                OpCode::Add,
+                OpCode::Get(4),
+                OpCode::Add,
+                OpCode::Get(3),
+                OpCode::Add,
+                OpCode::Get(2),
+                OpCode::Mul,
+                OpCode::Rot(6),
+                OpCode::Pop(5),
+                OpCode::Rot(3),
+                OpCode::Pop(2),
+                OpCode::Ret
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn def_with_let_binding_with_multiple_bindings_with_mixed_arg_decons() -> Result<(), Error> {
+        let result = compile(
+            r#"
+            (def func (v w) 
+                (let (((a  (b . c) (_ (d))) . v)
+                      (e . (/ a 2))
+                      ((_ (_ f)) . w))
+                    (+ f (+ e (+ a (+ b (+ c d)))))))
+            "#,
+        )?;
+        assert_eq!(
+            result.opcodes(),
+            vec![
+                OpCode::Rot(3),
+                OpCode::Get(1),
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Dup(1),
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Psh(Immediate::Number(2)),
+                OpCode::Get(2),
+                OpCode::Div,
+                OpCode::Get(7),
+                OpCode::Dup(1),
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Cdr,
+                OpCode::Car,
+                OpCode::Swp,
+                OpCode::Pop(1),
+                OpCode::Get(6),
+                OpCode::Get(6),
+                OpCode::Add,
+                OpCode::Get(5),
+                OpCode::Add,
+                OpCode::Get(4),
+                OpCode::Add,
+                OpCode::Get(3),
+                OpCode::Add,
+                OpCode::Get(2),
+                OpCode::Add,
+                OpCode::Rot(7),
+                OpCode::Pop(6),
+                OpCode::Rot(3),
+                OpCode::Pop(2),
+                OpCode::Ret
+            ]
+        );
+        Ok(())
+    }
 }
